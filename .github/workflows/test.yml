@@ -1,0 +1,30 @@
+name: Test
+
+on:
+  push:
+    branches: [ '**' ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: gradle/actions/setup-gradle@v6
+      - run: ./gradlew check -PsignAllPublications=false
+
+  test-kotlin-beta:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+      - run: sed -i 's/^kotlin = .*/kotlin = "2.5.0-Beta2"/' gradle/libs.versions.toml
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: gradle/actions/setup-gradle@v6
+      - run: ./gradlew check -PsignAllPublications=false
