@@ -1,11 +1,17 @@
+import reactcompiler.buildlogic.PUBLISH_TO_TEST_REPOSITORY
+import reactcompiler.buildlogic.testRepository
+
 plugins {
     `kotlin-dsl`
     id("reactcompiler.kotlin-jvm")
+    id("reactcompiler.publishing")
     alias(libs.plugins.gradlePluginPublish)
 }
 
 dependencies {
     compileOnly(libs.kotlin.gradlePluginApi)
+
+    testImplementation(gradleTestKit())
 }
 
 val repositoryUrl = providers.gradleProperty("POM_URL")
@@ -44,4 +50,16 @@ tasks.processResources {
     filesMatching("kotlin-react-compiler.properties") {
         expand(properties)
     }
+}
+
+tasks.test {
+    dependsOn(rootProject.subprojects.map { "${it.path}:$PUBLISH_TO_TEST_REPOSITORY" })
+    inputs.files(testRepository.map { fileTree(it) { include("**/$version/*") } })
+        .withPropertyName("testRepository")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+
+    systemProperty("pluginId", pluginId)
+    systemProperty("testRepository", testRepository.get().asFile.absolutePath)
+    systemProperty("pluginVersion", "$version")
+    systemProperty("kotlinVersion", libs.versions.kotlin.get())
 }

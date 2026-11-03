@@ -1,5 +1,6 @@
 plugins {
     id("reactcompiler.kotlin-jvm")
+    id("reactcompiler.publishing")
     alias(libs.plugins.mavenPublish)
 }
 
