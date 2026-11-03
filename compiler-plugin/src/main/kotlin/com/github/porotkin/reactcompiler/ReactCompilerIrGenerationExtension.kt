@@ -8,16 +8,20 @@ import org.jetbrains.kotlin.ir.IrStatement
 import org.jetbrains.kotlin.ir.UNDEFINED_OFFSET
 import org.jetbrains.kotlin.ir.builders.irCall
 import org.jetbrains.kotlin.ir.builders.irString
+import org.jetbrains.kotlin.ir.builders.irVararg
 import org.jetbrains.kotlin.ir.declarations.IrModuleFragment
 import org.jetbrains.kotlin.ir.declarations.IrSimpleFunction
 import org.jetbrains.kotlin.ir.expressions.IrBlockBody
 import org.jetbrains.kotlin.ir.expressions.IrCall
 import org.jetbrains.kotlin.ir.expressions.IrConst
 import org.jetbrains.kotlin.ir.expressions.IrExpression
+import org.jetbrains.kotlin.ir.expressions.IrSpreadElement
 import org.jetbrains.kotlin.ir.expressions.IrTypeOperator
 import org.jetbrains.kotlin.ir.expressions.IrTypeOperatorCall
+import org.jetbrains.kotlin.ir.expressions.IrVararg
 import org.jetbrains.kotlin.ir.symbols.IrSimpleFunctionSymbol
 import org.jetbrains.kotlin.ir.symbols.IrSymbol
+import org.jetbrains.kotlin.ir.types.classFqName
 import org.jetbrains.kotlin.ir.visitors.IrElementTransformerVoid
 import org.jetbrains.kotlin.ir.visitors.transformChildrenVoid
 import org.jetbrains.kotlin.name.CallableId
@@ -27,6 +31,7 @@ import org.jetbrains.kotlin.name.Name
 import org.jetbrains.kotlin.platform.isJs
 
 private val REACT = FqName("react")
+private val SAMPLE = FqName("sample.reactcompiler")
 private val HOOK_NAME = Regex("^use[A-Z0-9]")
 private const val USE_MEMO = "\"use memo\""
 
@@ -49,6 +54,17 @@ private class ReactSymbols(
     private val finder: DeclarationFinder,
 ) {
     val js = function(FqName("kotlin.js"), "js")
+    val hooks: Map<IrSimpleFunctionSymbol, IrSimpleFunctionSymbol> = buildList {
+        add(functions(REACT, "useMemo") to function(FqName("react.raw"), "useMemoRaw"))
+        add(
+            functions(REACT, "useCallback") to function(FqName("react.raw"), "useCallbackRaw") {
+                it.owner.typeParameters.single().superTypes.any { type -> type.classFqName == FqName("kotlin.Function") }
+            },
+        )
+        finder.findFunctions(callable(SAMPLE, "useEffectRawInline")).firstOrNull()?.let { target ->
+            add(finder.findFunctions(callable(SAMPLE, "useEffectInline")) to target)
+        }
+    }.flatMap { (sources, target) -> sources.map { it to target } }.toMap()
 
     private fun callable(
         packageName: FqName,
@@ -88,6 +104,25 @@ private class ReactCompilerTransformer(
             body.statements.add(0, builder(declaration.symbol).jsCode(USE_MEMO))
         }
         return declaration
+    }
+
+    override fun visitCall(expression: IrCall): IrExpression {
+        expression.transformChildrenVoid(this)
+        return when (expression.symbol) {
+            in symbols.hooks -> rewriteHook(expression)
+            else -> null
+        } ?: expression
+    }
+
+    private fun rewriteHook(call: IrCall): IrExpression? {
+        val dependencies = call.arguments[0] as IrVararg?
+        if (dependencies?.elements?.any { it is IrSpreadElement } == true) return null
+        val b = builder(call.symbol)
+        return b.irCall(symbols.hooks.getValue(call.symbol), call.type).apply {
+            call.typeArguments.forEachIndexed { index, type -> typeArguments[index] = type }
+            arguments[0] = call.arguments[1]
+            arguments[1] = dependencies ?: b.irVararg(context.irBuiltIns.anyNType, emptyList())
+        }
     }
 
     private fun builder(symbol: IrSymbol) =
