@@ -19,3 +19,4 @@ rootProject.name = "kotlin-react-compiler"
 enableFeaturePreview("TYPESAFE_PROJECT_ACCESSORS")
 
 include("compiler-plugin")
+include("gradle-plugin")
