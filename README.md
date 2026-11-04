@@ -6,7 +6,7 @@
 [![Kotlin](https://img.shields.io/badge/kotlin-2.4.21-blue.svg?logo=kotlin)](https://kotlinlang.org)
 [![License](https://img.shields.io/github/license/porotkin/kotlin-react-compiler)](LICENSE)
 
-A Kotlin/JS IR compiler plugin and Gradle plugin that lowers `kotlin-react` components (`FC`) and hooks (`useMemo`, `useCallback`, custom `use*` hooks) into React Compiler-compatible JavaScript shapes.
+A Kotlin/JS IR compiler plugin and Gradle plugin that lowers `kotlin-react` components (`FC`) and hooks (`useMemo`, `useCallback`, custom `use*` hooks) into [React Compiler](https://react.dev/learn/react-compiler)-compatible JavaScript shapes.
 
 ## Setup
 
