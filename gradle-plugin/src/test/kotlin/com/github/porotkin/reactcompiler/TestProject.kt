@@ -131,6 +131,9 @@ private val REACT_STUBS =
     fun <P : Props> FC(block: ChildrenBuilder.(props: P) -> Unit): FC<P> =
         block.unsafeCast<FC<P>>()
 
+    fun <P : Props> memo(type: FC<P>): FC<P> =
+        type
+
     fun <T> useMemo(vararg dependencies: Any?, callback: () -> T): T =
         callback()
 

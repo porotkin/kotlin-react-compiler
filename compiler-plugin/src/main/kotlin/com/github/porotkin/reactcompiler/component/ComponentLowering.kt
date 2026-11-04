@@ -2,7 +2,6 @@ package com.github.porotkin.reactcompiler.component
 
 import com.github.porotkin.reactcompiler.ReactLowering
 import com.github.porotkin.reactcompiler.ReactSymbols
-import com.github.porotkin.reactcompiler.any
 import org.jetbrains.kotlin.backend.common.extensions.IrPluginContext
 import org.jetbrains.kotlin.ir.IrFileEntry
 import org.jetbrains.kotlin.ir.IrStatement
@@ -36,12 +35,10 @@ internal class ComponentLowering(
         super.lower(irFile)
     }
 
+    /** Only a bare component is safe to initialize eagerly; wrappers like `memo(FC { })` run code and stay lazy. */
     override fun visitProperty(declaration: IrProperty): IrStatement {
         declaration.transformChildrenVoid(this)
-        val initializer = declaration.backingField?.initializer
-        val component = components.firstOrNull { initializer?.any { node -> node == it } == true }
-        if (component != null && initializer != null) {
-            initializer.expression = component
+        if (declaration.backingField?.initializer?.expression in components) {
             declaration.annotations += builder(declaration.symbol).irAnnotation(symbols.eagerInitialization)
         }
         return declaration

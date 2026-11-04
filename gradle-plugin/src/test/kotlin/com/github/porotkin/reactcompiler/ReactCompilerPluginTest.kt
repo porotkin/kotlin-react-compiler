@@ -81,6 +81,17 @@ class ReactCompilerPluginTest {
     }
 
     @Test
+    fun `keeps wrappers around a component in a property initializer`() {
+        val mjs = compile(
+            """
+            val Plain: FC<Props> = memo(FC { _ -> })
+            """,
+        )
+
+        assertTrue("Plain = memo(Plain\$lambda);" in mjs, "Expected memo call kept in:\n$mjs")
+    }
+
+    @Test
     fun `warns on a Kotlin version it is not built for`() {
         val project = TestProject(dir, kotlinVersion = "2.4.10").apply {
             module("app", "package app\nfun main() = Unit")
