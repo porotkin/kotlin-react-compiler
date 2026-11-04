@@ -71,7 +71,6 @@ import org.jetbrains.kotlin.name.Name
 import org.jetbrains.kotlin.platform.isJs
 
 private val REACT = FqName("react")
-private val SAMPLE = FqName("sample.reactcompiler")
 private val ELEMENT_BUILDER = FqName("react.ElementBuilder")
 private val CHILDREN_BUILDER = FqName("react.ChildrenBuilder")
 private val SET_DEFAULT_KEY = FqName("react.setDefaultKey")
@@ -97,10 +96,7 @@ private class ReactSymbols(
     private val finder: DeclarationFinder,
 ) {
     val js = function(FqName("kotlin.js"), "js")
-    val jsx = finder.findFunctions(callable(SAMPLE, "jsxRaw")).firstOrNull()
-        ?: function(FqName("react.jsx.runtime"), "jsx") { it.owner.parameters.size == 3 }
-    val jsxs = finder.findFunctions(callable(SAMPLE, "jsxsRaw")).firstOrNull()
-        ?: function(FqName("react.jsx.runtime"), "jsx") { it.owner.parameters.size == 3 }
+    val jsx = function(FqName("react.jsx.runtime"), "jsx") { it.owner.parameters.size == 3 }
     val fragment = finder.findProperties(callable(REACT, "Fragment")).single().owner.getter!!.symbol
     val fragmentProps = classType(REACT, "FragmentProps")
     val reactNode = classType(REACT, "ReactNode").makeNullable()
@@ -112,21 +108,14 @@ private class ReactSymbols(
         .single()
 
     val componentFactories: Set<IrSimpleFunctionSymbol> =
-        functions(REACT, "FC") { it.owner.parameters.size == 1 }.toSet() +
-            listOf("compilerFriendlyFC", "inlineFragmentFC", "inlineStatelessFCWithoutDirective")
-                .flatMap { name -> finder.findFunctions(callable(SAMPLE, name)).filter { it.owner.parameters.size == 1 } }
+        functions(REACT, "FC") { it.owner.parameters.size == 1 }.toSet()
 
-    val hooks: Map<IrSimpleFunctionSymbol, IrSimpleFunctionSymbol> = buildList {
-        add(functions(REACT, "useMemo") to function(FqName("react.raw"), "useMemoRaw"))
-        add(
-            functions(REACT, "useCallback") to function(FqName("react.raw"), "useCallbackRaw") {
-                it.owner.typeParameters.single().superTypes.any { type -> type.classFqName == FqName("kotlin.Function") }
-            },
-        )
-        finder.findFunctions(callable(SAMPLE, "useEffectRawInline")).firstOrNull()?.let { target ->
-            add(finder.findFunctions(callable(SAMPLE, "useEffectInline")) to target)
-        }
-    }.flatMap { (sources, target) -> sources.map { it to target } }.toMap()
+    val hooks: Map<IrSimpleFunctionSymbol, IrSimpleFunctionSymbol> = listOf(
+        functions(REACT, "useMemo") to function(FqName("react.raw"), "useMemoRaw"),
+        functions(REACT, "useCallback") to function(FqName("react.raw"), "useCallbackRaw") {
+            it.owner.typeParameters.single().superTypes.any { type -> type.classFqName == FqName("kotlin.Function") }
+        },
+    ).flatMap { (sources, target) -> sources.map { it to target } }.toMap()
 
     private fun callable(
         packageName: FqName,
@@ -327,7 +316,7 @@ private class ReactCompilerTransformer(
                 out += setter
             }
             setChildren(attrs, children, out)
-            out += jsx(type, attrs, element.defaultKey ?: sourceKey(element.call), children.size > 1)
+            out += jsx(type, attrs, element.defaultKey ?: sourceKey(element.call))
             return block(out)
         }
 
@@ -351,7 +340,7 @@ private class ReactCompilerTransformer(
                 else -> {
                     val attrs = local("attrs", b.irImplicitCast(b.jsCode("({})"), symbols.fragmentProps), out)
                     setChildren(attrs, children, out)
-                    jsx(b.irCall(symbols.fragment), attrs, null, multiple = true)
+                    jsx(b.irCall(symbols.fragment), attrs, null)
                 }
             }
 
@@ -371,9 +360,8 @@ private class ReactCompilerTransformer(
             type: IrExpression,
             attrs: IrVariable,
             key: IrExpression?,
-            multiple: Boolean,
         ): IrExpression =
-            b.irCall(if (multiple) symbols.jsxs else symbols.jsx, symbols.reactNode).apply {
+            b.irCall(symbols.jsx, symbols.reactNode).apply {
                 typeArguments[0] = attrs.type
                 arguments[0] = type
                 arguments[1] = b.irGet(attrs)
