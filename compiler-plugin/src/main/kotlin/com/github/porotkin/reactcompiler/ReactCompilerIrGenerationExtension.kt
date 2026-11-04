@@ -1,6 +1,5 @@
 package com.github.porotkin.reactcompiler
 
-import org.jetbrains.kotlin.backend.common.extensions.DeclarationFinder
 import org.jetbrains.kotlin.backend.common.extensions.IrGenerationExtension
 import org.jetbrains.kotlin.backend.common.extensions.IrPluginContext
 import org.jetbrains.kotlin.backend.common.lower.DeclarationIrBuilder
@@ -44,17 +43,13 @@ import org.jetbrains.kotlin.ir.expressions.IrTypeOperatorCall
 import org.jetbrains.kotlin.ir.expressions.IrVararg
 import org.jetbrains.kotlin.ir.expressions.IrWhen
 import org.jetbrains.kotlin.ir.symbols.IrFunctionSymbol
-import org.jetbrains.kotlin.ir.symbols.IrSimpleFunctionSymbol
 import org.jetbrains.kotlin.ir.symbols.IrSymbol
 import org.jetbrains.kotlin.ir.symbols.IrValueSymbol
 import org.jetbrains.kotlin.ir.types.IrType
-import org.jetbrains.kotlin.ir.types.classFqName
 import org.jetbrains.kotlin.ir.types.isChar
 import org.jetbrains.kotlin.ir.types.isUnit
-import org.jetbrains.kotlin.ir.types.makeNullable
 import org.jetbrains.kotlin.ir.types.typeWith
 import org.jetbrains.kotlin.ir.util.allOverridden
-import org.jetbrains.kotlin.ir.util.defaultType
 import org.jetbrains.kotlin.ir.util.fqNameWhenAvailable
 import org.jetbrains.kotlin.ir.util.hasAnnotation
 import org.jetbrains.kotlin.ir.util.parentClassOrNull
@@ -64,13 +59,10 @@ import org.jetbrains.kotlin.ir.visitors.IrVisitorVoid
 import org.jetbrains.kotlin.ir.visitors.acceptChildrenVoid
 import org.jetbrains.kotlin.ir.visitors.acceptVoid
 import org.jetbrains.kotlin.ir.visitors.transformChildrenVoid
-import org.jetbrains.kotlin.name.CallableId
-import org.jetbrains.kotlin.name.ClassId
 import org.jetbrains.kotlin.name.FqName
 import org.jetbrains.kotlin.name.Name
 import org.jetbrains.kotlin.platform.isJs
 
-private val REACT = FqName("react")
 private val ELEMENT_BUILDER = FqName("react.ElementBuilder")
 private val CHILDREN_BUILDER = FqName("react.ChildrenBuilder")
 private val SET_DEFAULT_KEY = FqName("react.setDefaultKey")
@@ -84,65 +76,10 @@ class ReactCompilerIrGenerationExtension : IrGenerationExtension {
     ) {
         if (!pluginContext.platform.isJs()) return
         val file = moduleFragment.files.firstOrNull() ?: return
-        val finder = pluginContext.finderForSource(file)
-        if (finder.findClass(ClassId(REACT, Name.identifier("FragmentProps"))) == null) return
-        val transformer = ReactCompilerTransformer(ReactSymbols(pluginContext, finder))
+        val symbols = ReactSymbols.resolve(pluginContext.finderForSource(file)) ?: return
+        val transformer = ReactCompilerTransformer(pluginContext, symbols)
         moduleFragment.files.forEach { it.transform(transformer, null) }
     }
-}
-
-private class ReactSymbols(
-    val context: IrPluginContext,
-    private val finder: DeclarationFinder,
-) {
-    val js = function(FqName("kotlin.js"), "js")
-    val jsx = function(FqName("react.jsx.runtime"), "jsx") { it.owner.parameters.size == 3 }
-    val fragment = finder.findProperties(callable(REACT, "Fragment")).single().owner.getter!!.symbol
-    val fragmentProps = classType(REACT, "FragmentProps")
-    val reactNode = classType(REACT, "ReactNode").makeNullable()
-    val childrenSetter = finder
-        .findProperties(CallableId(ClassId(REACT, Name.identifier("PropsWithChildren")), Name.identifier("children")))
-        .single().owner.setter!!.symbol
-    val eagerInitialization = finder
-        .findConstructors(ClassId(FqName("kotlin.js"), Name.identifier("EagerInitialization")))
-        .single()
-
-    val componentFactories: Set<IrSimpleFunctionSymbol> =
-        functions(REACT, "FC") { it.owner.parameters.size == 1 }.toSet()
-
-    val hooks: Map<IrSimpleFunctionSymbol, IrSimpleFunctionSymbol> = listOf(
-        functions(REACT, "useMemo") to function(FqName("react.raw"), "useMemoRaw"),
-        functions(REACT, "useCallback") to function(FqName("react.raw"), "useCallbackRaw") {
-            it.owner.typeParameters.single().superTypes.any { type -> type.classFqName == FqName("kotlin.Function") }
-        },
-    ).flatMap { (sources, target) -> sources.map { it to target } }.toMap()
-
-    private fun callable(
-        packageName: FqName,
-        name: String,
-    ) = CallableId(packageName, Name.identifier(name))
-
-    private fun classType(
-        packageName: FqName,
-        name: String,
-    ): IrType =
-        finder.findClass(ClassId(packageName, Name.identifier(name)))?.owner?.defaultType
-            ?: error("React Compiler IR plugin: missing $packageName.$name")
-
-    private fun function(
-        packageName: FqName,
-        name: String,
-        filter: (IrSimpleFunctionSymbol) -> Boolean = { true },
-    ): IrSimpleFunctionSymbol =
-        functions(packageName, name, filter).first()
-
-    private fun functions(
-        packageName: FqName,
-        name: String,
-        filter: (IrSimpleFunctionSymbol) -> Boolean = { true },
-    ): List<IrSimpleFunctionSymbol> =
-        finder.findFunctions(callable(packageName, name)).filter(filter)
-            .ifEmpty { error("React Compiler IR plugin: missing $packageName.$name") }
 }
 
 private sealed interface Item
@@ -178,9 +115,9 @@ private class Choice(
 ) : Child
 
 private class ReactCompilerTransformer(
+    private val context: IrPluginContext,
     private val symbols: ReactSymbols,
 ) : IrElementTransformerVoid() {
-    private val context = symbols.context
     private val components = mutableSetOf<IrExpression>()
     private lateinit var file: IrFile
 
@@ -218,7 +155,7 @@ private class ReactCompilerTransformer(
         expression.transformChildrenVoid(this)
         return when (expression.symbol) {
             in symbols.componentFactories -> lowerComponent(expression)
-            in symbols.hooks -> rewriteHook(expression)
+            in symbols.rawHooks -> rewriteHook(expression)
             else -> null
         } ?: expression
     }
@@ -227,7 +164,7 @@ private class ReactCompilerTransformer(
         val dependencies = call.arguments[0] as IrVararg?
         if (dependencies?.elements?.any { it is IrSpreadElement } == true) return null
         val b = builder(call.symbol)
-        return b.irCall(symbols.hooks.getValue(call.symbol), call.type).apply {
+        return b.irCall(symbols.rawHooks.getValue(call.symbol), call.type).apply {
             call.typeArguments.forEachIndexed { index, type -> typeArguments[index] = type }
             arguments[0] = call.arguments[1]
             arguments[1] = dependencies ?: b.irVararg(context.irBuiltIns.anyNType, emptyList())
