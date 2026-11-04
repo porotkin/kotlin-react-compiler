@@ -92,6 +92,108 @@ class ReactCompilerPluginTest {
     }
 
     @Test
+    fun `passes an empty dependency array to a useMemo without dependencies`() {
+        val mjs = compile(
+            """
+            fun useHeader(): String = useMemo { "Results" }
+            """,
+        )
+
+        assertTrue("useMemoRaw(useHeader\$lambda, [])" in mjs, "Expected empty dependency array in:\n$mjs")
+    }
+
+    @Test
+    fun `keeps a useMemo that spreads its dependencies`() {
+        val mjs = compile(
+            """
+            fun <T> useList(vararg elements: T): List<T> = useMemo(*elements) { elements.asList() }
+            """,
+        )
+
+        assertTrue("return useMemo(tmp, useList\$lambda(elements));" in mjs, "Expected spread useMemo left as is in:\n$mjs")
+    }
+
+    @Test
+    fun `returns null from an early return after hooks`() {
+        val mjs = compile(
+            """
+            interface SectionProps : Props {
+                var visible: Boolean
+                var title: String
+            }
+
+            val div: ElementType<FragmentProps> = "div".unsafeCast<ElementType<FragmentProps>>()
+            val span: ElementType<FragmentProps> = "span".unsafeCast<ElementType<FragmentProps>>()
+
+            val Section: FC<SectionProps> = FC { props ->
+                val state = ReactModule.useState(false)
+
+                if (!props.visible) return@FC
+
+                div {
+                    span { +props.title }
+                    if (state[0] as Boolean) {
+                        span { +"Details" }
+                    }
+                }
+            }
+            """,
+        )
+
+        assertTrue("return null;" in mjs, "Expected early return null in:\n$mjs")
+        assertTrue("\$l\$block" !in mjs, "Expected no labeled block in:\n$mjs")
+    }
+
+    @Test
+    fun `sets nested element props on its attrs object instead of a hoisted receiver lambda`() {
+        val mjs = compile(
+            """
+            interface ButtonProps : FragmentProps {
+                var type: String
+            }
+
+            val footer: ElementType<FragmentProps> = "footer".unsafeCast<ElementType<FragmentProps>>()
+            val button: ElementType<ButtonProps> = "button".unsafeCast<ElementType<ButtonProps>>()
+
+            val Banner: FC<Props> = FC { _ ->
+                footer {
+                    button {
+                        type = "button"
+                        +"Proceed"
+                    }
+                }
+            }
+            """,
+        )
+
+        assertTrue("\$this\$" !in mjs, "Expected no builder receiver lambda in:\n$mjs")
+        assertTrue(Regex("""attrs\.set_type_[\w$]+\('button'\);""") in mjs, "Expected type set on button attrs in:\n$mjs")
+    }
+
+    @Test
+    fun `reads a same-file component without its getter`() {
+        val mjs = compile(
+            """
+            interface BadgeProps : Props {
+                var text: String
+            }
+
+            val span: ElementType<FragmentProps> = "span".unsafeCast<ElementType<FragmentProps>>()
+
+            val Badge: FC<BadgeProps> = FC { props ->
+                span { +props.text }
+            }
+
+            val Demo: FC<BadgeProps> = FC { props ->
+                Badge { text = props.text }
+            }
+            """,
+        )
+
+        assertTrue("var type = Badge;" in mjs, "Expected Badge read without get_Badge() in:\n$mjs")
+    }
+
+    @Test
     fun `warns on a Kotlin version it is not built for`() {
         val project = TestProject(dir, kotlinVersion = "2.4.10").apply {
             module("app", "package app\nfun main() = Unit")
