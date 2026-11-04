@@ -47,3 +47,17 @@ internal fun IrElement.any(predicate: (IrElement) -> Boolean): Boolean {
     )
     return found
 }
+
+/** Number of elements in this subtree, itself included, that match [predicate]. */
+internal fun IrElement.count(predicate: (IrElement) -> Boolean): Int {
+    var count = 0
+    acceptVoid(
+        object : IrVisitorVoid() {
+            override fun visitElement(element: IrElement) {
+                if (predicate(element)) count++
+                element.acceptChildrenVoid(this)
+            }
+        },
+    )
+    return count
+}
