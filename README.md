@@ -9,7 +9,7 @@ Apply the plugin to a Kotlin/JS project:
 ```kotlin
 plugins {
     kotlin("multiplatform") version "2.4.21"
-    id("io.github.porotkin.kotlin-react-compiler") version "0.1.0-SNAPSHOT"
+    id("io.github.porotkin.kotlin-react-compiler") version "0.1.0"
 }
 ```
 
