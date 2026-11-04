@@ -63,11 +63,36 @@ class ReactCompilerPluginTest {
     }
 
     @Test
+    fun `wraps several root elements in a Fragment`() {
+        val mjs = compile(
+            """
+            val div: ElementType<FragmentProps> = "div".unsafeCast<ElementType<FragmentProps>>()
+
+            val Pair: FC<Props> = FC { _ ->
+                div { }
+                div { }
+            }
+            """,
+        )
+
+        assertTrue("function Pair\$lambda(_unused_var__" in mjs, "Expected lowered component in:\n$mjs")
+        assertTrue("throwIrLinkageError" !in mjs, "Expected a linkable Fragment jsx call in:\n$mjs")
+        assertTrue(Regex("""jsx\(get_Fragment\(\), \w+, null\)""") in mjs, "Expected keyless Fragment jsx call in:\n$mjs")
+    }
+
+    @Test
     fun `warns on a Kotlin version it is not built for`() {
         val project = TestProject(dir, kotlinVersion = "2.4.10").apply {
             module("app", "package app\nfun main() = Unit")
         }
 
         assertTrue("not 2.4.10, and may fail." in project.run(":app:help").output)
+    }
+
+    /** Compiles [declarations] in an `app` module importing `react.*` and returns the module's JavaScript. */
+    private fun compile(declarations: String): String {
+        TestProject(dir).apply { module("app", "package app\n\nimport react.*\n\n${declarations.trimIndent()}") }
+            .run(":app:compileDevelopmentExecutableKotlinJs")
+        return dir.walkTopDown().first { it.name.endsWith("-app.mjs") }.readText()
     }
 }

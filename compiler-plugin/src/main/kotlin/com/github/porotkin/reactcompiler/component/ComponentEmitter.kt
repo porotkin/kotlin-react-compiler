@@ -151,7 +151,8 @@ internal class ComponentEmitter(
             typeArguments[0] = attrs.type
             arguments[0] = type
             arguments[1] = b.irGet(attrs)
-            arguments[2] = key
+            // An unset argument means "omitted", which fails to link: kotlin-react's `jsx` has no default `defaultKey`.
+            arguments[2] = key ?: b.irNull()
         }
 
     /** [value] itself when re-reading it is safe, otherwise a local holding it, so evaluation order is kept. */
