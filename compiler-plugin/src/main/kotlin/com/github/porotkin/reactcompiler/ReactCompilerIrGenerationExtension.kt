@@ -1,8 +1,9 @@
 package com.github.porotkin.reactcompiler
 
+import com.github.porotkin.reactcompiler.hook.HookCallLowering
+import com.github.porotkin.reactcompiler.hook.HookDirectiveLowering
 import org.jetbrains.kotlin.backend.common.extensions.IrGenerationExtension
 import org.jetbrains.kotlin.backend.common.extensions.IrPluginContext
-import org.jetbrains.kotlin.backend.common.lower.DeclarationIrBuilder
 import org.jetbrains.kotlin.ir.IrElement
 import org.jetbrains.kotlin.ir.IrStatement
 import org.jetbrains.kotlin.ir.UNDEFINED_OFFSET
@@ -37,13 +38,8 @@ import org.jetbrains.kotlin.ir.expressions.IrFunctionExpression
 import org.jetbrains.kotlin.ir.expressions.IrGetObjectValue
 import org.jetbrains.kotlin.ir.expressions.IrGetValue
 import org.jetbrains.kotlin.ir.expressions.IrReturn
-import org.jetbrains.kotlin.ir.expressions.IrSpreadElement
-import org.jetbrains.kotlin.ir.expressions.IrTypeOperator
-import org.jetbrains.kotlin.ir.expressions.IrTypeOperatorCall
-import org.jetbrains.kotlin.ir.expressions.IrVararg
 import org.jetbrains.kotlin.ir.expressions.IrWhen
 import org.jetbrains.kotlin.ir.symbols.IrFunctionSymbol
-import org.jetbrains.kotlin.ir.symbols.IrSymbol
 import org.jetbrains.kotlin.ir.symbols.IrValueSymbol
 import org.jetbrains.kotlin.ir.types.IrType
 import org.jetbrains.kotlin.ir.types.isChar
@@ -66,9 +62,13 @@ import org.jetbrains.kotlin.platform.isJs
 private val ELEMENT_BUILDER = FqName("react.ElementBuilder")
 private val CHILDREN_BUILDER = FqName("react.ChildrenBuilder")
 private val SET_DEFAULT_KEY = FqName("react.setDefaultKey")
-private val HOOK_NAME = Regex("^use[A-Z0-9]")
-private const val USE_MEMO = "\"use memo\""
 
+/**
+ * Runs the plugin's [ReactLowering]s on Kotlin/JS modules that use kotlin-react.
+ *
+ * Hook passes run before [ComponentLowering] so a component body is analyzed with its hook calls already
+ * in their final form, the same order a single post-order traversal gives.
+ */
 class ReactCompilerIrGenerationExtension : IrGenerationExtension {
     override fun generate(
         moduleFragment: IrModuleFragment,
@@ -77,8 +77,11 @@ class ReactCompilerIrGenerationExtension : IrGenerationExtension {
         if (!pluginContext.platform.isJs()) return
         val file = moduleFragment.files.firstOrNull() ?: return
         val symbols = ReactSymbols.resolve(pluginContext.finderForSource(file)) ?: return
-        val transformer = ReactCompilerTransformer(pluginContext, symbols)
-        moduleFragment.files.forEach { it.transform(transformer, null) }
+        listOf(
+            HookCallLowering(pluginContext, symbols),
+            HookDirectiveLowering(pluginContext, symbols),
+            ComponentLowering(pluginContext, symbols),
+        ).forEach { it.lower(moduleFragment) }
     }
 }
 
@@ -114,16 +117,16 @@ private class Choice(
     val branches: List<List<Item>>,
 ) : Child
 
-private class ReactCompilerTransformer(
-    private val context: IrPluginContext,
-    private val symbols: ReactSymbols,
-) : IrElementTransformerVoid() {
+private class ComponentLowering(
+    context: IrPluginContext,
+    symbols: ReactSymbols,
+) : ReactLowering(context, symbols) {
     private val components = mutableSetOf<IrExpression>()
     private lateinit var file: IrFile
 
-    override fun visitFile(declaration: IrFile): IrFile {
-        file = declaration
-        return super.visitFile(declaration)
+    override fun lower(irFile: IrFile) {
+        file = irFile
+        super.lower(irFile)
     }
 
     override fun visitProperty(declaration: IrProperty): IrStatement {
@@ -137,38 +140,10 @@ private class ReactCompilerTransformer(
         return declaration
     }
 
-    override fun visitSimpleFunction(declaration: IrSimpleFunction): IrStatement {
-        declaration.transformChildrenVoid(this)
-        val body = declaration.body as? IrBlockBody
-        if (
-            body != null &&
-            !declaration.isInline &&
-            HOOK_NAME.containsMatchIn(declaration.name.asString()) &&
-            body.statements.firstOrNull()?.isDirective() != true
-        ) {
-            body.statements.add(0, builder(declaration.symbol).jsCode(USE_MEMO))
-        }
-        return declaration
-    }
-
     override fun visitCall(expression: IrCall): IrExpression {
         expression.transformChildrenVoid(this)
-        return when (expression.symbol) {
-            in symbols.componentFactories -> lowerComponent(expression)
-            in symbols.rawHooks -> rewriteHook(expression)
-            else -> null
-        } ?: expression
-    }
-
-    private fun rewriteHook(call: IrCall): IrExpression? {
-        val dependencies = call.arguments[0] as IrVararg?
-        if (dependencies?.elements?.any { it is IrSpreadElement } == true) return null
-        val b = builder(call.symbol)
-        return b.irCall(symbols.rawHooks.getValue(call.symbol), call.type).apply {
-            call.typeArguments.forEachIndexed { index, type -> typeArguments[index] = type }
-            arguments[0] = call.arguments[1]
-            arguments[1] = dependencies ?: b.irVararg(context.irBuiltIns.anyNType, emptyList())
-        }
+        if (expression.symbol !in symbols.componentFactories) return expression
+        return lowerComponent(expression) ?: expression
     }
 
     private fun lowerComponent(call: IrCall): IrExpression? {
@@ -197,7 +172,7 @@ private class ReactCompilerTransformer(
         private val b = builder(fn.symbol)
 
         fun emit(items: List<Item>): List<IrStatement> {
-            val out = mutableListOf<IrStatement>(b.jsCode(USE_MEMO))
+            val out = mutableListOf<IrStatement>(b.irUseMemo(symbols))
             val returnsNull = object : IrElementTransformerVoid() {
                 override fun visitReturn(expression: IrReturn): IrExpression {
                     expression.transformChildrenVoid(this)
@@ -206,7 +181,7 @@ private class ReactCompilerTransformer(
             }
             val children = emitItems(
                 items = items
-                    .filterNot { it is Plain && it.statement.isDirective() }
+                    .filterNot { it is Plain && it.statement.isUseMemo(symbols) }
                     .map { if (it is Plain) Plain(it.statement.transform(returnsNull, null) as IrStatement) else it },
                 out = out,
                 props = null,
@@ -246,7 +221,7 @@ private class ReactCompilerTransformer(
             val type = stable(element.call.arguments[1]!!, "type", out)
             val props = mutableListOf<Pair<IrCall, IrExpression>>()
             val children = emitItems(element.items, out, props)
-            val attrs = local("attrs", b.irImplicitCast(b.jsCode("({})"), element.propsType), out)
+            val attrs = local("attrs", b.irImplicitCast(b.irJs(symbols, "({})"), element.propsType), out)
             for ((setter, value) in props) {
                 setter.arguments[0] = b.irGet(attrs)
                 setter.arguments[setter.arguments.lastIndex] = value
@@ -275,7 +250,7 @@ private class ReactCompilerTransformer(
                 0 -> b.irNull(symbols.reactNode)
                 1 -> children.single()
                 else -> {
-                    val attrs = local("attrs", b.irImplicitCast(b.jsCode("({})"), symbols.fragmentProps), out)
+                    val attrs = local("attrs", b.irImplicitCast(b.irJs(symbols, "({})"), symbols.fragmentProps), out)
                     setChildren(attrs, children, out)
                     jsx(b.irCall(symbols.fragment), attrs, null)
                 }
@@ -329,17 +304,6 @@ private class ReactCompilerTransformer(
             val entry = file.fileEntry
             return b.irString("@rdk/${entry.getLineNumber(call.startOffset)}_${entry.getColumnNumber(call.startOffset)}")
         }
-    }
-
-    private fun builder(symbol: IrSymbol) =
-        DeclarationIrBuilder(context, symbol, UNDEFINED_OFFSET, UNDEFINED_OFFSET)
-
-    private fun DeclarationIrBuilder.jsCode(code: String): IrExpression =
-        irCall(symbols.js).apply { arguments[0] = irString(code) }
-
-    private fun IrStatement.isDirective(): Boolean {
-        val call = unwrapCoercion() as? IrCall ?: return false
-        return call.symbol == symbols.js && (call.arguments[0] as? IrConst)?.value == USE_MEMO
     }
 }
 
@@ -465,9 +429,6 @@ private fun IrExpression.isStable(): Boolean =
 private fun IrExpression.branchStatements(): List<IrStatement> =
     (this as? IrBlock)?.statements ?: listOf(this)
 
-private fun IrStatement.unwrapCoercion(): IrStatement =
-    if (this is IrTypeOperatorCall && operator == IrTypeOperator.IMPLICIT_COERCION_TO_UNIT) argument else this
-
 private fun List<IrStatement>.trimTrailingReturn(owner: IrFunctionSymbol): List<IrStatement> {
     val last = lastOrNull() as? IrReturn ?: return this
     if (last.returnTargetSymbol != owner) return this
@@ -489,17 +450,4 @@ private fun IrStatement.uses(receiver: IrValueSymbol): Int {
         },
     )
     return count
-}
-
-private fun IrElement.any(predicate: (IrElement) -> Boolean): Boolean {
-    var found = false
-    acceptVoid(
-        object : IrVisitorVoid() {
-            override fun visitElement(element: IrElement) {
-                if (found) return
-                if (predicate(element)) found = true else element.acceptChildrenVoid(this)
-            }
-        },
-    )
-    return found
 }
