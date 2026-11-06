@@ -7,6 +7,7 @@ import org.jetbrains.kotlin.ir.declarations.IrVariable
 import org.jetbrains.kotlin.ir.expressions.IrCall
 import org.jetbrains.kotlin.ir.expressions.IrExpression
 import org.jetbrains.kotlin.ir.expressions.IrWhileLoop
+import org.jetbrains.kotlin.ir.symbols.IrSimpleFunctionSymbol
 import org.jetbrains.kotlin.ir.symbols.IrValueSymbol
 import org.jetbrains.kotlin.ir.types.IrType
 
@@ -63,17 +64,20 @@ internal class Text(
     override val receiverUses get() = 1
 }
 
-/** A prop passed as an argument to an element `invoke`, set dynamically by [name]. */
+/** A prop passed as an argument to an element `invoke`: set via [setter] when known, or dynamically by [name]. */
 internal class PropArg(
     val name: String,
+    val setter: IrSimpleFunctionSymbol?,
     val value: IrExpression,
 )
 
-/** `type()`, `type { ... }` or `provider(value) { ... }`, optionally keyed through `setDefaultKey`. */
+/** `type()`, `type { ... }`, `provider(value) { ... }` or `wrapper(props...) { ... }`, optionally keyed through `setDefaultKey`. */
 internal class Element(
     val call: IrCall,
+    /** For a wrapper class whose `@ElementWrapper` `invoke` takes `ChildrenBuilder`, the getter of its `ElementType` property. */
+    val componentGetter: IrSimpleFunctionSymbol?,
     val defaultKey: IrExpression?,
-    /** Props passed as arguments: the `value` of `provider(value) { ... }`. */
+    /** Props passed as arguments: the `value` of `provider(value) { ... }` or the verified props of an `@ElementWrapper`. */
     val props: List<PropArg>,
     /** The receiver of the element body, read as the element's attrs object; `null` without a body. */
     val receiver: IrValueSymbol?,

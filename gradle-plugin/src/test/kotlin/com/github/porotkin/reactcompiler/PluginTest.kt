@@ -13,8 +13,9 @@ abstract class PluginTest {
     protected fun runNode(
         module: String,
         script: String,
+        root: File = dir,
     ): String {
-        val mjsFile = dir.walkTopDown().first { it.name.endsWith("-$module.mjs") }
+        val mjsFile = root.walkTopDown().first { it.name.endsWith("-$module.mjs") }
         val reactDir = File(mjsFile.parentFile, "node_modules/react").apply { mkdirs() }
         File(reactDir, "package.json").writeText("""{"name":"react","type":"module","main":"index.mjs"}""")
         File(reactDir, "index.mjs").writeText(

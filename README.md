@@ -42,3 +42,26 @@ The plugin rewrites the wrapper body so it takes an already-built component. Eve
 lowered lambda or, when the lambda cannot be lowered, `FC(lambda)`, so runtime behavior is preserved. The contract is
 checked in the declaring module (a wrapper that uses its lambda in any other way fails the build), and call sites in
 every module must be compiled with the plugin. Wrappers without the annotation are never rewritten.
+
+## Element wrappers
+
+A class with a single public `ElementType` property and a final, non-overriding member `operator fun invoke` taking
+`ChildrenBuilder`, prop parameters, and a `ChildrenBuilder.() -> Unit` block can opt in to lowering its call sites to
+`jsx()` by annotating `invoke` with `@ElementWrapper`:
+
+```kotlin
+package com.github.porotkin.reactcompiler
+
+@Target(AnnotationTarget.FUNCTION)
+annotation class ElementWrapper
+```
+
+The declaring module verifies at compile time that `invoke` is final and non-overriding, that every parameter matches a
+writable property on the element's `PropsWithChildren` type, and that the body only invokes the `ElementType` property,
+assigning each parameter to the matching prop and calling `block()`. Lowered call sites emit typed calls to the verified
+`Props` setters (preserving `@JsName` and Kotlin property mangling).
+
+For cross-module calls, the plugin records a synthetic `@kotlin.js.EagerInitialization` stamp on verified `invoke`
+functions in `.klib` metadata (which user code cannot apply to a function because `@EagerInitialization` targets
+properties). Downstream modules only trust external `@ElementWrapper` declarations carrying this stamp, so declarations
+from modules compiled without the plugin are never lowered.

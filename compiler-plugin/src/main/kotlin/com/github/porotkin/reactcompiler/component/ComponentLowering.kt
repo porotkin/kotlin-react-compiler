@@ -45,6 +45,7 @@ internal class ComponentLowering(
     override fun visitFunctionNew(declaration: IrFunction): IrStatement {
         if (declaration is IrSimpleFunction) {
             wrappers.checkDeclaration(declaration, currentFile)
+            ElementWrappers.checkDeclaration(declaration, currentFile, context, symbols)
         }
         return super.visitFunctionNew(declaration)
     }

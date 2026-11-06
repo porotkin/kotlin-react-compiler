@@ -36,10 +36,14 @@ import org.jetbrains.kotlin.ir.expressions.impl.IrDynamicMemberExpressionImpl
 import org.jetbrains.kotlin.ir.expressions.impl.IrDynamicOperatorExpressionImpl
 import org.jetbrains.kotlin.ir.symbols.IrSimpleFunctionSymbol
 import org.jetbrains.kotlin.ir.symbols.IrValueSymbol
+import org.jetbrains.kotlin.ir.types.IrSimpleType
 import org.jetbrains.kotlin.ir.types.IrType
+import org.jetbrains.kotlin.ir.types.IrTypeProjection
 import org.jetbrains.kotlin.ir.types.isChar
 import org.jetbrains.kotlin.ir.util.isSubtypeOfClass
+import org.jetbrains.kotlin.ir.util.parentAsClass
 import org.jetbrains.kotlin.ir.util.patchDeclarationParents
+import org.jetbrains.kotlin.ir.util.substitute
 import org.jetbrains.kotlin.ir.visitors.IrElementTransformerVoid
 import org.jetbrains.kotlin.ir.visitors.transformChildrenVoid
 
@@ -187,8 +191,19 @@ internal class ComponentEmitter(
 
     private fun element(element: Element): IrExpression {
         val out = mutableListOf<IrStatement>()
-        val type = stable(element.call.arguments[1]!!, "type", out)
-        val props = element.props.map { prop -> PropArg(prop.name, stable(prop.value, prop.name, out)) }
+        val rawType = element.componentGetter?.let { getter ->
+            val wrapper = element.call.arguments[0]!!
+            val wrapperClass = getter.owner.parentAsClass
+            val typeArgs = (wrapper.type as? IrSimpleType)?.arguments?.mapNotNull { (it as? IrTypeProjection)?.type }
+            val returnType = if (typeArgs != null && typeArgs.size == wrapperClass.typeParameters.size) {
+                getter.owner.returnType.substitute(wrapperClass.typeParameters.map { it.symbol }.zip(typeArgs).toMap())
+            } else {
+                getter.owner.returnType
+            }
+            b.irCall(getter, returnType).apply { arguments[0] = wrapper }
+        } ?: element.call.arguments[1]!!
+        val type = stable(rawType, "type", out)
+        val props = element.props.map { prop -> PropArg(prop.name, prop.setter, stable(prop.value, prop.name, out)) }
         // Only `provider(value) { }` sets props dynamically by name and has `ChildrenBuilder` as `element.propsType`.
         val attrsType = if (element.propsType.isSubtypeOfClass(symbols.propsClass)) element.propsType else symbols.fragmentProps
         // Created at its first use, or once the children are built, so it stays out of the code that builds them.
@@ -196,7 +211,14 @@ internal class ComponentEmitter(
             local("attrs", b.irImplicitCast(b.irJs(symbols, "({})"), attrsType), out).also { attrs ->
                 element.receiver?.let { substitutions[it] = attrs }
                 for (prop in props) {
-                    out += dynamic(IrDynamicOperator.EQ, b.irGet(attrs), prop.name, prop.value)
+                    out += if (prop.setter != null) {
+                        b.irCall(prop.setter).apply {
+                            arguments[0] = b.irGet(attrs)
+                            arguments[1] = prop.value
+                        }
+                    } else {
+                        dynamic(IrDynamicOperator.EQ, b.irGet(attrs), prop.name, prop.value)
+                    }
                 }
             }
         }

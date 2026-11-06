@@ -425,4 +425,526 @@ class ComponentLoweringTest : PluginTest() {
         assertTrue(""""loopTree":{"type":"div","props":{"children":[{"type":"span","props":{"children":"0"},"key":"item-0"},{"type":"span","props":{"children":"1"},"key":"item-1"}]}""" in output, "Unexpected loopTree in:\n$output")
     }
 
+    @Test
+    fun `lowers cross-module generic ValueContext wrapper invoke and preserves runtime fallback and escape checks`() {
+        TestProject(dir).apply {
+            module(
+                "ctx",
+                """
+                package ctx
+
+                import com.github.porotkin.reactcompiler.ElementWrapper
+                import react.*
+
+                class ValueContext<T> internal constructor(
+                    internal val value: Provider<T>,
+                    internal val setter: Provider<(T) -> Unit>,
+                    val component: FC<ValueContextProps<T>>,
+                ) {
+                    @ElementWrapper
+                    context(builder: ChildrenBuilder)
+                    operator fun invoke(
+                        value: T,
+                        setter: (T) -> Unit = {},
+                        block: ChildrenBuilder.() -> Unit,
+                    ) {
+                        with(builder) {
+                            component {
+                                this.value = value
+                                this.setter = setter
+                                block()
+                            }
+                        }
+                    }
+                }
+
+                class UnannotatedWrapper(
+                    val component: FC<ValueContextProps<Int>>,
+                ) {
+                    context(builder: ChildrenBuilder)
+                    operator fun invoke(
+                        value: Int,
+                        setter: (Int) -> Unit,
+                        block: ChildrenBuilder.() -> Unit,
+                    ) {
+                        with(builder) {
+                            component {
+                                this.value = value + 100
+                                this.setter = setter
+                                block()
+                            }
+                        }
+                    }
+                }
+
+                interface JsNamedSetterProps<T> : PropsWithChildren {
+                    @get:JsName("getCustomValue")
+                    @set:JsName("setCustomValue")
+                    var value: T
+
+                    @get:JsName("getCustomSetter")
+                    @set:JsName("setCustomSetter")
+                    var setter: (T) -> Unit
+                }
+
+                class JsNamedValueContext<T>(
+                    val component: FC<JsNamedSetterProps<T>>,
+                ) {
+                    @ElementWrapper
+                    context(builder: ChildrenBuilder)
+                    operator fun invoke(
+                        value: T,
+                        setter: (T) -> Unit,
+                        block: ChildrenBuilder.() -> Unit,
+                    ) {
+                        with(builder) {
+                            component {
+                                this.value = value
+                                this.setter = setter
+                                block()
+                            }
+                        }
+                    }
+                }
+
+                fun <T> createJsNamedValueContext(tag: String): JsNamedValueContext<T> {
+                    val valueProvider = "${'$'}tag:value".unsafeCast<Provider<T>>()
+                    val setterProvider = "${'$'}tag:setter".unsafeCast<Provider<(T) -> Unit>>()
+                    val component: FC<JsNamedSetterProps<T>> = FC { props ->
+                        setterProvider(props.setter) {
+                            valueProvider(props.value) {
+                                +props.children.toString()
+                            }
+                        }
+                    }
+                    return JsNamedValueContext(component)
+                }
+
+                fun <T> createValueContext(tag: String): ValueContext<T> {
+                    val valueProvider = "${'$'}tag:value".unsafeCast<Provider<T>>()
+                    val setterProvider = "${'$'}tag:setter".unsafeCast<Provider<(T) -> Unit>>()
+                    val component: FC<ValueContextProps<T>> = FC { props ->
+                        setterProvider(props.setter) {
+                            valueProvider(props.value) {
+                                +props.children.toString()
+                            }
+                        }
+                    }
+                    return ValueContext(valueProvider, setterProvider, component)
+                }
+                """,
+            )
+            module(
+                "untrusted",
+                """
+                package untrusted
+
+                import com.github.porotkin.reactcompiler.ElementWrapper
+                import react.*
+
+                class UntrustedWrapper(
+                    val component: FC<ValueContextProps<Int>>,
+                ) {
+                    @ElementWrapper
+                    context(builder: ChildrenBuilder)
+                    operator fun invoke(
+                        value: Int,
+                        setter: (Int) -> Unit,
+                        block: ChildrenBuilder.() -> Unit,
+                    ) {
+                        // Body does something unrelated in a module compiled without the plugin
+                    }
+                }
+                """,
+                applyPlugin = false,
+            )
+            module(
+                "app",
+                """
+                package app
+
+                import ctx.*
+                import untrusted.*
+                import react.*
+
+                val span: ElementType<FragmentProps> = "span".unsafeCast<ElementType<FragmentProps>>()
+                val CountContext: ValueContext<Int> = createValueContext("Count")
+                val LabelContext: ValueContext<String> = createValueContext("Label")
+                val JsNamedContext: JsNamedValueContext<Int> = createJsNamedValueContext("JsNamed")
+                val UnannotatedCtx: UnannotatedWrapper = UnannotatedWrapper(CountContext.component)
+                val UntrustedCtx: UntrustedWrapper = UntrustedWrapper(CountContext.component)
+
+                val ProvidedView: FC<Props> = FC { props ->
+                    val count = props.asDynamic().count as Int
+                    val label = props.asDynamic().label as String
+                    val setCount: (Int) -> Unit = {}
+                    val setLabel: (String) -> Unit = {}
+                    CountContext(count, setCount) {
+                        LabelContext(label, setLabel) {
+                            span { +label }
+                        }
+                    }
+                }
+
+                val JsNamedProvidedView: FC<Props> = FC { props ->
+                    val count = props.asDynamic().count as Int
+                    val setCount: (Int) -> Unit = {}
+                    JsNamedContext(count, setCount) {
+                        span { +"js-named" }
+                    }
+                }
+
+                val UsesUnannotated: FC<Props> = FC { _ ->
+                    UnannotatedCtx(1, {}) {
+                        span { +"unannotated" }
+                    }
+                }
+
+                val UsesUntrusted: FC<Props> = FC { _ ->
+                    UntrustedCtx(1, {}) {
+                        span { +"untrusted" }
+                    }
+                }
+
+                val UsesOmittedDefault: FC<Props> = FC { _ ->
+                    CountContext(1) {
+                        span { +"defaulted" }
+                    }
+                }
+
+                fun escapeBuilder(builder: ChildrenBuilder): Int = 0
+
+                val EscapesInArg: FC<Props> = FC { _ ->
+                    CountContext(escapeBuilder(this), {}) {
+                        span { +"bad" }
+                    }
+                }
+
+                val EscapesInBody: FC<Props> = FC { _ ->
+                    CountContext(1, {}) {
+                        escapeBuilder(this)
+                        span { +"bad" }
+                    }
+                }
+
+                class RecordingBuilder : ChildrenBuilder {
+                    val recorded = js("([])")
+
+                    override fun <P : Props> ElementType<P>.invoke(block: P.() -> Unit) {
+                        val p = RecordingBuilder().unsafeCast<P>()
+                        p.block()
+                        recorded.push(react.jsx.runtime.jsx(this, p, "fallback-key"))
+                    }
+
+                    override fun String.unaryPlus() {
+                        this@RecordingBuilder.asDynamic().children = this
+                    }
+                }
+
+                fun buildFallback(builder: ChildrenBuilder, count: Int, setter: (Int) -> Unit) {
+                    with(builder) {
+                        CountContext(count, setter) {
+                            +"fallback-${'$'}count"
+                        }
+                    }
+                }
+
+                @JsExport
+                fun runChecks(): Any? {
+                    val loweredTree = ProvidedView.asDynamic()(js("({ count: 7, label: 'ok' })"))
+                    val loweredRendered = loweredTree.type(loweredTree.props)
+                    val builder = RecordingBuilder()
+                    val setter: (Int) -> Unit = {}
+                    buildFallback(builder, 42, setter)
+                    val fallbackElement = builder.recorded[0]
+                    val fallbackRendered = fallbackElement.type(fallbackElement.props)
+                    return js("({ loweredTree: loweredTree, loweredRendered: loweredRendered, fallbackValue: fallbackElement.props.value, fallbackRendered: fallbackRendered })")
+                }
+                """,
+                "ctx",
+                "untrusted",
+            )
+        }.run(":app:compileDevelopmentExecutableKotlinJs")
+
+        val mjs = dir.walkTopDown().first { it.name.endsWith("-app.mjs") }.readText()
+        assertTrue("function ProvidedView\$lambda(props)" in mjs, "Expected ProvidedView lowered in:\n$mjs")
+        assertTrue(Regex("""get_CountContext\(\)\.get_component_[\w$]+\(\)""") in mjs, "Expected CountContext.component getter used as jsx type in:\n$mjs")
+        assertTrue(Regex("""attrs\w*\.set_value_[\w$]+\(count\);""") in mjs, "Expected non-external value prop set via typed mangled setter on attrs in:\n$mjs")
+        assertTrue(Regex("""attrs\w*\.set_setter_[\w$]+\(setCount\);""") in mjs, "Expected non-external setter prop set via typed mangled setter on attrs in:\n$mjs")
+        assertTrue(Regex("""attrs\w*\.setCustomValue\(count\);""") in mjs, "Expected @set:JsName('setCustomValue') prop set via custom setter on attrs in:\n$mjs")
+        assertTrue(Regex("""attrs\w*\.setCustomSetter\(setCount\);""") in mjs, "Expected @set:JsName('setCustomSetter') prop set via custom setter on attrs in:\n$mjs")
+        assertTrue(Regex("get_UnannotatedCtx\\(\\);[\\s\\S]*?invoke_[\\w$]+\\(\\\$this\\\$FC, 1, \\w+, UsesUnannotated\\\$lambda\\\$lambda_0\\)") in mjs, "Expected unannotated wrapper invoke not lowered in:\n$mjs")
+        assertTrue(Regex("get_UntrustedCtx\\(\\);[\\s\\S]*?invoke_[\\w$]+\\(\\\$this\\\$FC, 1, \\w+, UsesUntrusted\\\$lambda\\\$lambda_0\\)") in mjs, "Expected untrusted external-module wrapper invoke not lowered in:\n$mjs")
+        assertTrue(Regex("invoke\\\$default_[\\w$]+\\(\\\$this\\\$FC, 1, VOID, UsesOmittedDefault\\\$lambda\\\$lambda\\)") in mjs, "Expected omitted default argument call to bail safely without crashing in:\n$mjs")
+        assertTrue("escapeBuilder(\$this\$FC)" in mjs, "Expected EscapesInArg to bail when builder escapes in arg in:\n$mjs")
+        assertTrue("escapeBuilder(\$this\$CountContext)" in mjs, "Expected EscapesInBody to bail when builder escapes in body in:\n$mjs")
+
+        val output = runNode("app", "console.log(JSON.stringify(m.runChecks()));")
+        assertTrue(""""fallbackValue":42""" in output, "Expected unlowered fallback to populate value prop in:\n$output")
+        assertTrue(""""fallbackRendered":{"type":"Count:setter","props":{"children":{"type":"Count:value","props":{"value":42,"children":"fallback-42"}""" in output, "Expected unlowered fallback component to render in:\n$output")
+        assertTrue(""""loweredRendered":{"type":"Count:setter","props":{"children":{"type":"Count:value","props":{"value":7""" in output, "Expected lowered tree component to execute and render count=7 in:\n$output")
+        assertTrue(""""loweredTree":{"props":{"value":7,"children":{"props":{"value":"ok","children":{"type":"span","props":{"children":"ok"},"key":"@rdk/20_12"}},"key":"@rdk/19_8"}},"key":"@rdk/18_4"}""" in output, "Expected lowered tree to pass count=7 and label='ok' with keys in:\n$output")
+
+        val externalDir = dir.resolve("external-jsname")
+        TestProject(externalDir, externalProps = true).apply {
+            module(
+                "app",
+                """
+                package app
+
+                import com.github.porotkin.reactcompiler.ElementWrapper
+                import react.*
+
+                external interface ExternalJsNamedProps<T> : PropsWithChildren {
+                    @JsName("v")
+                    var value: T
+
+                    @JsName("s")
+                    var setter: (T) -> Unit
+                }
+
+                class ExternalJsNamedContext<T>(
+                    val component: FC<ExternalJsNamedProps<T>>,
+                ) {
+                    @ElementWrapper
+                    context(builder: ChildrenBuilder)
+                    operator fun invoke(
+                        value: T,
+                        setter: (T) -> Unit,
+                        block: ChildrenBuilder.() -> Unit,
+                    ) {
+                        with(builder) {
+                            component {
+                                this.value = value
+                                this.setter = setter
+                                block()
+                            }
+                        }
+                    }
+                }
+
+                val valueProvider: Provider<Int> = "Ext:value".unsafeCast<Provider<Int>>()
+                val setterProvider: Provider<(Int) -> Unit> = "Ext:setter".unsafeCast<Provider<(Int) -> Unit>>()
+                val span: ElementType<FragmentProps> = "span".unsafeCast<ElementType<FragmentProps>>()
+
+                val ExtContext: ExternalJsNamedContext<Int> = ExternalJsNamedContext(
+                    FC { props ->
+                        setterProvider(props.setter) {
+                            valueProvider(props.value) {
+                                +props.children.toString()
+                            }
+                        }
+                    },
+                )
+
+                val ExtView: FC<Props> = FC { props ->
+                    val count = props.asDynamic().count as Int
+                    val setCount: (Int) -> Unit = {}
+                    ExtContext(count, setCount) {
+                        span { +"ext" }
+                    }
+                }
+
+                fun buildExtFallback(builder: ChildrenBuilder, count: Int, setter: (Int) -> Unit) {
+                    with(builder) {
+                        ExtContext(count, setter) {
+                            +"ext-fallback-${'$'}count"
+                        }
+                    }
+                }
+
+                @JsExport
+                fun runExtChecks(): Any? {
+                    val tree = ExtView.asDynamic()(js("({ count: 11 })"))
+                    val rendered = tree.type(tree.props)
+                    val fbBuilder = js("({ recorded: [] })").unsafeCast<ChildrenBuilder>()
+                    buildExtFallback(fbBuilder, 19, {})
+                    val fbElement = fbBuilder.asDynamic().recorded[0]
+                    val fbRendered = fbElement.type(fbElement.props)
+                    return js("({ v: tree.props.v, hasRawValue: ('value' in tree.props), rendered: rendered, fbV: fbElement.props.v, fbHasRawValue: ('value' in fbElement.props), fbRendered: fbRendered })")
+                }
+                """,
+            )
+        }.run(":app:compileDevelopmentExecutableKotlinJs")
+
+        val extMjs = externalDir.walkTopDown().first { it.name.endsWith("-app.mjs") }.readText()
+        assertTrue(Regex("""attrs\w*\.v = count;""") in extMjs, "Expected external @JsName('v') prop set on attrs.v in:\n$extMjs")
+        assertTrue(Regex("""attrs\w*\.s = setCount;""") in extMjs, "Expected external @JsName('s') prop set on attrs.s in:\n$extMjs")
+        val extOutput = runNode("app", "console.log(JSON.stringify(m.runExtChecks()));", externalDir)
+        assertTrue(""""v":11,"hasRawValue":false""" in extOutput, "Expected external @JsName('v') prop stored under .v (not .value) in:\n$extOutput")
+        assertTrue(""""rendered":{"type":"Ext:setter","props":{"children":{"type":"Ext:value","props":{"value":11""" in extOutput, "Expected external @JsName component to execute and read props.v=11 in:\n$extOutput")
+        assertTrue(""""fbV":19,"fbHasRawValue":false""" in extOutput, "Expected external @JsName fallback to store .v=19 in:\n$extOutput")
+        assertTrue(""""fbRendered":{"type":"Ext:setter","props":{"children":{"type":"Ext:value","props":{"value":19,"children":"ext-fallback-19"}""" in extOutput, "Expected external @JsName fallback component to render in:\n$extOutput")
+    }
+
+    @Test
+    fun `fails the build when an ElementWrapper has a mismatched prop name, non-conforming body, or invalid signature`() {
+        val mismatchedProp = TestProject(dir.resolve("mismatched")).apply {
+            module(
+                "app",
+                """
+                package app
+
+                import com.github.porotkin.reactcompiler.ElementWrapper
+                import react.*
+
+                class BadPropWrapper(
+                    val component: FC<ValueContextProps<Int>>,
+                ) {
+                    @ElementWrapper
+                    context(builder: ChildrenBuilder)
+                    operator fun invoke(
+                        wrongName: Int,
+                        setter: (Int) -> Unit,
+                        block: ChildrenBuilder.() -> Unit,
+                    ) {
+                        with(builder) {
+                            component {
+                                this.value = wrongName
+                                this.setter = setter
+                                block()
+                            }
+                        }
+                    }
+                }
+                """,
+            )
+        }.runAndFail(":app:compileDevelopmentExecutableKotlinJs").output
+        assertTrue("parameter 'wrongName' must match a writable property on ValueContextProps" in mismatchedProp, "Expected prop mismatch diagnostic in:\n$mismatchedProp")
+
+        val badBody = TestProject(dir.resolve("bad-body")).apply {
+            module(
+                "app",
+                """
+                package app
+
+                import com.github.porotkin.reactcompiler.ElementWrapper
+                import react.*
+
+                var sideEffect = 0
+
+                class BadBodyWrapper(
+                    val component: FC<ValueContextProps<Int>>,
+                ) {
+                    @ElementWrapper
+                    context(builder: ChildrenBuilder)
+                    operator fun invoke(
+                        value: Int,
+                        setter: (Int) -> Unit,
+                        block: ChildrenBuilder.() -> Unit,
+                    ) {
+                        sideEffect++
+                        with(builder) {
+                            component {
+                                this.value = value
+                                this.setter = setter
+                                block()
+                            }
+                        }
+                    }
+                }
+                """,
+            )
+        }.runAndFail(":app:compileDevelopmentExecutableKotlinJs").output
+        assertTrue("must only delegate to its ElementType property, assigning each parameter to the matching prop and calling block()" in badBody, "Expected body diagnostic in:\n$badBody")
+
+        val badSignature = TestProject(dir.resolve("bad-sig")).apply {
+            module(
+                "app",
+                """
+                package app
+
+                import com.github.porotkin.reactcompiler.ElementWrapper
+                import react.*
+
+                class BadSigWrapper(
+                    val component: FC<ValueContextProps<Int>>,
+                ) {
+                    @ElementWrapper
+                    context(builder: ChildrenBuilder)
+                    operator fun invoke(
+                        vararg value: Int,
+                        block: ChildrenBuilder.() -> Unit,
+                    ) {}
+                }
+                """,
+            )
+        }.runAndFail(":app:compileDevelopmentExecutableKotlinJs").output
+        assertTrue("must be a final, non-overriding, non-inline, non-external operator fun invoke on a class with one public ElementType property" in badSignature, "Expected signature diagnostic in:\n$badSignature")
+
+        val openInvoke = TestProject(dir.resolve("open-invoke")).apply {
+            module(
+                "app",
+                """
+                package app
+
+                import com.github.porotkin.reactcompiler.ElementWrapper
+                import react.*
+
+                open class OpenWrapper(
+                    val component: FC<ValueContextProps<Int>>,
+                ) {
+                    @ElementWrapper
+                    context(builder: ChildrenBuilder)
+                    open operator fun invoke(
+                        value: Int,
+                        setter: (Int) -> Unit,
+                        block: ChildrenBuilder.() -> Unit,
+                    ) {
+                        with(builder) {
+                            component {
+                                this.value = value
+                                this.setter = setter
+                                block()
+                            }
+                        }
+                    }
+                }
+                """,
+            )
+        }.runAndFail(":app:compileDevelopmentExecutableKotlinJs").output
+        assertTrue("must be a final, non-overriding, non-inline, non-external operator fun invoke on a class with one public ElementType property" in openInvoke, "Expected open invoke diagnostic in:\n$openInvoke")
+
+        val overrideInvoke = TestProject(dir.resolve("override-invoke")).apply {
+            module(
+                "app",
+                """
+                package app
+
+                import com.github.porotkin.reactcompiler.ElementWrapper
+                import react.*
+
+                interface InvokableWrapper {
+                    context(builder: ChildrenBuilder)
+                    operator fun invoke(
+                        value: Int,
+                        setter: (Int) -> Unit,
+                        block: ChildrenBuilder.() -> Unit,
+                    )
+                }
+
+                class OverrideWrapper(
+                    val component: FC<ValueContextProps<Int>>,
+                ) : InvokableWrapper {
+                    @ElementWrapper
+                    context(builder: ChildrenBuilder)
+                    override operator fun invoke(
+                        value: Int,
+                        setter: (Int) -> Unit,
+                        block: ChildrenBuilder.() -> Unit,
+                    ) {
+                        with(builder) {
+                            component {
+                                this.value = value
+                                this.setter = setter
+                                block()
+                            }
+                        }
+                    }
+                }
+                """,
+            )
+        }.runAndFail(":app:compileDevelopmentExecutableKotlinJs").output
+        assertTrue("must be a final, non-overriding, non-inline, non-external operator fun invoke on a class with one public ElementType property" in overrideInvoke, "Expected override invoke diagnostic in:\n$overrideInvoke")
+    }
 }

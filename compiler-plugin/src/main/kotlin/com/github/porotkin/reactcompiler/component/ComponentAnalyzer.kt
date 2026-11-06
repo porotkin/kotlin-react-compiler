@@ -27,6 +27,8 @@ import org.jetbrains.kotlin.ir.symbols.IrFunctionSymbol
 import org.jetbrains.kotlin.ir.symbols.IrSimpleFunctionSymbol
 import org.jetbrains.kotlin.ir.symbols.IrTypeParameterSymbol
 import org.jetbrains.kotlin.ir.symbols.IrValueSymbol
+import org.jetbrains.kotlin.ir.types.IrSimpleType
+import org.jetbrains.kotlin.ir.types.IrTypeProjection
 import org.jetbrains.kotlin.ir.types.classOrNull
 import org.jetbrains.kotlin.ir.types.classifierOrNull
 import org.jetbrains.kotlin.ir.types.isUnit
@@ -34,7 +36,9 @@ import org.jetbrains.kotlin.ir.util.allOverridden
 import org.jetbrains.kotlin.ir.util.fqNameWhenAvailable
 import org.jetbrains.kotlin.ir.util.hasAnnotation
 import org.jetbrains.kotlin.ir.util.isSubtypeOfClass
+import org.jetbrains.kotlin.ir.util.parentAsClass
 import org.jetbrains.kotlin.ir.util.parentClassOrNull
+import org.jetbrains.kotlin.ir.util.substitute
 import org.jetbrains.kotlin.ir.visitors.IrVisitorVoid
 import org.jetbrains.kotlin.ir.visitors.acceptChildrenVoid
 import org.jetbrains.kotlin.ir.visitors.acceptVoid
@@ -161,24 +165,38 @@ internal class ComponentAnalyzer(
             call: IrCall,
             defaultKey: IrExpression?,
         ): Element? {
+            val wrapper = if (call.isOnReceiver()) null else ElementWrappers.resolve(call.symbol.owner, symbols) ?: return null
+            val receiverIndex = if (wrapper == null) 0 else 1
             // The type, props and body move into code of their own, so they must not read this builder, use defaults, or pass varargs.
-            if (call.arguments.withIndex().any { (index, arg) -> arg == null || arg is IrVararg || index != 0 && arg.uses(receiver) != 0 }) return null
+            if (call.arguments.withIndex().any { (index, arg) -> arg == null || arg is IrVararg || index != receiverIndex && arg.uses(receiver) != 0 }) return null
             if (call.arguments.size == 2) {
-                return Element(call, defaultKey, emptyList(), null, call.typeArguments[0] ?: return null, emptyList())
+                return Element(call, null, defaultKey, emptyList(), null, call.typeArguments[0] ?: return null, emptyList())
             }
             val block = (call.arguments.last() as? IrFunctionExpression)?.function ?: return null
             val bodyReceiver = block.parameters.singleOrNull() ?: return null
             val props = (2 until call.arguments.lastIndex).map { index ->
                 PropArg(
                     name = call.symbol.owner.parameters[index].name.asString(),
+                    setter = wrapper?.propSetters?.getOrNull(index - 2),
                     value = call.arguments[index] ?: return null,
                 )
             }
-            // A `provider(value) { }` body only adds children; a `type { }` body may also set props on the attrs object.
+            val propsType = if (wrapper != null) {
+                val wrapperClass = wrapper.componentGetter.owner.parentAsClass
+                val typeArgs = (call.arguments[0]?.type as? IrSimpleType)?.arguments?.mapNotNull { (it as? IrTypeProjection)?.type }
+                if (typeArgs != null && typeArgs.size == wrapperClass.typeParameters.size) {
+                    wrapper.propsType.substitute(wrapperClass.typeParameters.map { it.symbol }.zip(typeArgs).toMap())
+                } else {
+                    wrapper.propsType
+                }
+            } else {
+                bodyReceiver.type
+            }
+            // A `provider(value) { }` or `@ElementWrapper` body only adds children; a `type { }` body may also set props on the attrs object.
             val allowAttrs = props.isEmpty() && bodyReceiver.type.classOrNull != symbols.childrenBuilderClass
             val items = Scope(bodyReceiver.symbol, block.symbol, isRoot = false, isTail = true, allowAttrs, isElementBody = allowAttrs)
                 .analyze(block.blockStatements() ?: return null) ?: return null
-            return Element(call, defaultKey, props, bodyReceiver.symbol, bodyReceiver.type, items)
+            return Element(call, wrapper?.componentGetter, defaultKey, props, bodyReceiver.symbol, propsType, items)
         }
 
         private fun childWithProps(
@@ -260,13 +278,17 @@ internal class ComponentAnalyzer(
             return then to orElse
         }
 
-        /** `type { }` / `type()` / `provider(value) { }`: an element `invoke` on this scope's builder. */
+        /** `type { }` / `type()` / `provider(value) { }` / `wrapper(props...) { }`: an element `invoke` on this scope's builder. */
         private fun IrCall.isElementInvoke(): Boolean =
             symbol.owner.name.asString() == "invoke" &&
-                arguments.size in 2..4 &&
-                isOnReceiver() &&
-                arguments[1]?.type?.isSubtypeOfClass(symbols.elementTypeClass) == true &&
-                symbol.owner.allOverridden(includeSelf = true).any { it.hasAnnotation(ELEMENT_BUILDER) }
+                (
+                    arguments.size in 2..4 &&
+                        isOnReceiver() &&
+                        arguments[1]?.type?.isSubtypeOfClass(symbols.elementTypeClass) == true &&
+                        symbol.owner.allOverridden(includeSelf = true).any { it.hasAnnotation(ELEMENT_BUILDER) } ||
+                        (arguments.getOrNull(1) as? IrGetValue)?.symbol == receiver &&
+                        ElementWrappers.resolve(symbol.owner, symbols) != null
+                )
 
         private fun IrCall.isUnaryPlus(): Boolean =
             isChildrenBuilderMember("unaryPlus", arity = 2)

@@ -7,6 +7,7 @@ import java.io.File
 internal class TestProject(
     private val dir: File,
     private val kotlinVersion: String = System.getProperty("kotlinVersion"),
+    private val externalProps: Boolean = false,
 ) {
     private val repository = System.getProperty("testRepository")
 
@@ -59,7 +60,7 @@ internal class TestProject(
 
     private fun writeRootBuild() {
         write("$STUBS_MODULE/build.gradle.kts", "")
-        write("$STUBS_MODULE/src/jsMain/kotlin/ReactStubs.kt", REACT_STUBS)
+        write("$STUBS_MODULE/src/jsMain/kotlin/ReactStubs.kt", if (externalProps) REACT_EXTERNAL_STUBS else REACT_STUBS)
         write("$STUBS_MODULE/src/jsMain/kotlin/ReactAnnotations.kt", REACT_ANNOTATIONS)
         write("$STUBS_MODULE/src/jsMain/kotlin/ReactRawStubs.kt", REACT_RAW_STUBS)
         write("$STUBS_MODULE/src/jsMain/kotlin/ReactJsxStubs.kt", REACT_JSX_STUBS)
@@ -113,6 +114,8 @@ private val REACT_ANNOTATIONS =
     package com.github.porotkin.reactcompiler
 
     annotation class ComponentWrapper
+
+    annotation class ElementWrapper
     """.trimIndent() + "\n"
 
 private val REACT_STUBS =
@@ -151,6 +154,11 @@ private val REACT_STUBS =
 
     external interface Provider<T> : ElementType<PropsWithValue<T>>
 
+    interface ValueContextProps<T> : PropsWithChildren {
+        var value: T
+        var setter: (T) -> Unit
+    }
+
     @JsModule("react")
     external object ReactModule {
         val Fragment: ElementType<FragmentProps>
@@ -186,6 +194,115 @@ private val REACT_STUBS =
     fun ChildrenBuilder.setDefaultKey(key: String) {}
 
     @Suppress("NOTHING_TO_INLINE")
+    inline fun <P : Props> FC(
+        crossinline block: ChildrenBuilder.(props: P) -> Unit,
+    ): FC<P> =
+        ({ props: P ->
+            Fragment.unsafeCast<ChildrenBuilder>().block(props)
+        }).unsafeCast<FC<P>>()
+
+    fun <P : Props> memo(type: FC<P>): FC<P> =
+        type
+
+    fun <T> useMemo(vararg dependencies: Any?, callback: () -> T): T =
+        callback()
+
+    fun <T : Function<*>> useCallback(vararg dependencies: Any?, callback: T): T =
+        callback
+    """.trimIndent() + "\n"
+
+private val REACT_EXTERNAL_STUBS =
+    """
+    @file:Suppress(
+        "WRONG_BODY_OF_EXTERNAL_DECLARATION",
+        "WRONG_EXTERNAL_DECLARATION",
+        "EXTENSION_FUNCTION_IN_EXTERNAL_DECLARATION",
+        "INLINE_EXTERNAL_DECLARATION",
+        "NON_ABSTRACT_MEMBER_OF_EXTERNAL_INTERFACE",
+        "DECLARATION_CANT_BE_INLINED",
+        "NOTHING_TO_INLINE",
+    )
+
+    package react
+
+    annotation class ElementBuilder
+
+    external interface ReactNode
+
+    external interface Props {
+        var key: Any?
+    }
+
+    external interface PropsWithChildren : Props, ChildrenBuilder {
+        var children: Any?
+    }
+
+    external interface PropsWithValue<T> : PropsWithChildren {
+        var value: T
+    }
+
+    external interface FragmentProps : PropsWithChildren
+
+    external interface ElementType<P : Props>
+
+    external interface FC<P : Props> : ElementType<P>
+
+    external interface Provider<T> : ElementType<PropsWithValue<T>>
+
+    external interface ValueContextProps<T> : PropsWithChildren {
+        var value: T
+        var setter: (T) -> Unit
+    }
+
+    @JsModule("react")
+    external object ReactModule {
+        val Fragment: ElementType<FragmentProps>
+        fun <T> useState(initial: T): Array<Any?>
+    }
+
+    val Fragment: ElementType<FragmentProps>
+        get() = ReactModule.Fragment
+
+    sealed external interface ChildrenBuilder {
+        @ElementBuilder
+        inline operator fun <P : Props> ElementType<P>.invoke() {}
+
+        @ElementBuilder
+        inline operator fun <P : Props> ElementType<P>.invoke(
+            noinline block: P.() -> Unit,
+        ) {
+            addChild(this, block)
+        }
+
+        @ElementBuilder
+        inline operator fun <T> Provider<T>.invoke(
+            value: T,
+            noinline block: ChildrenBuilder.() -> Unit,
+        ) {}
+
+        inline operator fun String.unaryPlus() {
+            this@ChildrenBuilder.asDynamic().children = this
+        }
+
+        inline operator fun Char.unaryPlus() {}
+
+        inline fun <P : Props> child(
+            type: ElementType<P>,
+            props: P,
+        ) {}
+    }
+
+    fun <P : Props> ChildrenBuilder.addChild(
+        type: ElementType<P>,
+        block: P.() -> Unit,
+    ) {
+        val p = js("({})").unsafeCast<P>()
+        p.block()
+        asDynamic().recorded.push(react.jsx.runtime.jsx(type, p, "fallback-key"))
+    }
+
+    fun ChildrenBuilder.setDefaultKey(key: String) {}
+
     inline fun <P : Props> FC(
         crossinline block: ChildrenBuilder.(props: P) -> Unit,
     ): FC<P> =
