@@ -14,26 +14,28 @@ internal class TestProject(
 
     private val pluginVersion = System.getProperty("pluginVersion")
 
-    private val modules = mutableListOf<String>()
+    private val modules = mutableListOf(STUBS_MODULE)
 
+    /**
+     * Adds a module compiled with the plugin. It depends on the React stubs, which, like kotlin-react, are compiled
+     * without the plugin, and on the modules in [dependsOn].
+     */
     fun module(
         name: String,
         source: String,
+        vararg dependsOn: String,
+        applyPlugin: Boolean = true,
     ) {
-        val fileName = name.replaceFirstChar(Char::uppercaseChar)
         modules += name
+        val dependencies = (listOf(STUBS_MODULE) + dependsOn).joinToString("; ") { "implementation(project(\":$it\"))" }
+        val pluginsBlock = if (applyPlugin) "plugins {\n    id(\"$pluginId\")\n}\n" else ""
         write(
             "$name/build.gradle.kts",
             """
-            plugins {
-                id("$pluginId")
-            }
+            ${pluginsBlock}kotlin { sourceSets { jsMain { dependencies { $dependencies } } } }
             """,
         )
-        write("$name/src/jsMain/kotlin/ReactStubs.kt", REACT_STUBS)
-        write("$name/src/jsMain/kotlin/ReactRawStubs.kt", REACT_RAW_STUBS)
-        write("$name/src/jsMain/kotlin/ReactJsxStubs.kt", REACT_JSX_STUBS)
-        write("$name/src/jsMain/kotlin/$fileName.kt", source)
+        write("$name/src/jsMain/kotlin/${name.replaceFirstChar(Char::uppercaseChar)}.kt", source)
     }
 
     fun run(vararg tasks: String): BuildResult {
@@ -46,10 +48,11 @@ internal class TestProject(
             .build()
     }
 
-    fun read(path: String): String =
-        File(dir, path).readText()
-
     private fun writeRootBuild() {
+        write("$STUBS_MODULE/build.gradle.kts", "")
+        write("$STUBS_MODULE/src/jsMain/kotlin/ReactStubs.kt", REACT_STUBS)
+        write("$STUBS_MODULE/src/jsMain/kotlin/ReactRawStubs.kt", REACT_RAW_STUBS)
+        write("$STUBS_MODULE/src/jsMain/kotlin/ReactJsxStubs.kt", REACT_JSX_STUBS)
         write(
             "settings.gradle.kts",
             """
@@ -89,6 +92,8 @@ internal class TestProject(
         File(dir, path).apply { parentFile.mkdirs() }.writeText(text.trimIndent() + "\n")
     }
 }
+
+private const val STUBS_MODULE = "react-stubs"
 
 private val REACT_STUBS =
     """
