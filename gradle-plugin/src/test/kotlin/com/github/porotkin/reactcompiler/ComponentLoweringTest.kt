@@ -65,6 +65,38 @@ class ComponentLoweringTest : PluginTest() {
     }
 
     @Test
+    fun `pushes loop children onto arrays and passes an explicit key to jsx`() {
+        val mjs = compile(
+            """
+            interface ItemProps : FragmentProps {
+                var items: List<String>
+            }
+
+            val div: ElementType<ItemProps> = "div".unsafeCast<ElementType<ItemProps>>()
+            val span: ElementType<ItemProps> = "span".unsafeCast<ElementType<ItemProps>>()
+
+            val Lists: FC<ItemProps> = FC { props ->
+                div {
+                    for (entry in props.items) {
+                        span {
+                            key = entry
+                            +entry
+                        }
+                    }
+                    repeat(props.items.size) { index ->
+                        span { +index.toString() }
+                    }
+                }
+            }
+            """,
+        )
+
+        val lists = Regex("""(list\w*)\.push\(""").findAll(mjs).map { it.groupValues[1] }.toSet()
+        assertTrue(lists.size == 2, "Expected for and repeat loop children pushed onto two arrays in:\n$mjs")
+        assertTrue(Regex("""jsx\(type\w*, attrs\w*, entry\)""") in mjs, "Expected explicit key passed as 3rd argument to jsx in:\n$mjs")
+    }
+
+    @Test
     fun `binds a safe-call let parameter to a local and an implicit-cast element receiver to attrs`() {
         val mjs = compile(
             """

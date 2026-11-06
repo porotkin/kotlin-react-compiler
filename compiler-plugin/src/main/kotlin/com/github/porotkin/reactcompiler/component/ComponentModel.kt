@@ -1,9 +1,11 @@
 package com.github.porotkin.reactcompiler.component
 
 import org.jetbrains.kotlin.ir.IrStatement
+import org.jetbrains.kotlin.ir.declarations.IrSimpleFunction
 import org.jetbrains.kotlin.ir.declarations.IrValueParameter
 import org.jetbrains.kotlin.ir.expressions.IrCall
 import org.jetbrains.kotlin.ir.expressions.IrExpression
+import org.jetbrains.kotlin.ir.expressions.IrWhileLoop
 import org.jetbrains.kotlin.ir.symbols.IrValueSymbol
 import org.jetbrains.kotlin.ir.types.IrType
 
@@ -78,6 +80,20 @@ internal class Branch(
     val condition: IrExpression?,
     val items: List<Item>,
 )
+
+/** A `for` / `while` loop. */
+internal class WhileLoop(
+    val loop: IrWhileLoop,
+    val items: List<Item>,
+    conditionUses: Int,
+) : Nested(items, conditionUses)
+
+/** `repeat(times) { ... }` */
+internal class RepeatLoop(
+    val call: IrCall,
+    val action: IrSimpleFunction,
+    val items: List<Item>,
+) : Nested(items, 0)
 
 /** `value.let { parameter -> ... }` */
 internal class LetBlock(

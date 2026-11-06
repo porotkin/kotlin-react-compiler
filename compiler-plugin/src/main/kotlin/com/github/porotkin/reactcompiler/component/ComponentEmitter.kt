@@ -7,6 +7,7 @@ import com.github.porotkin.reactcompiler.irVal
 import com.github.porotkin.reactcompiler.isUseMemo
 import org.jetbrains.kotlin.ir.IrFileEntry
 import org.jetbrains.kotlin.ir.IrStatement
+import org.jetbrains.kotlin.ir.UNDEFINED_OFFSET
 import org.jetbrains.kotlin.ir.builders.IrBuilderWithScope
 import org.jetbrains.kotlin.ir.builders.irBlock
 import org.jetbrains.kotlin.ir.builders.irBranch
@@ -25,11 +26,14 @@ import org.jetbrains.kotlin.ir.declarations.IrVariable
 import org.jetbrains.kotlin.ir.expressions.IrBlockBody
 import org.jetbrains.kotlin.ir.expressions.IrCall
 import org.jetbrains.kotlin.ir.expressions.IrConst
+import org.jetbrains.kotlin.ir.expressions.IrDynamicOperator
 import org.jetbrains.kotlin.ir.expressions.IrExpression
 import org.jetbrains.kotlin.ir.expressions.IrFunctionExpression
 import org.jetbrains.kotlin.ir.expressions.IrGetObjectValue
 import org.jetbrains.kotlin.ir.expressions.IrGetValue
 import org.jetbrains.kotlin.ir.expressions.IrReturn
+import org.jetbrains.kotlin.ir.expressions.impl.IrDynamicMemberExpressionImpl
+import org.jetbrains.kotlin.ir.expressions.impl.IrDynamicOperatorExpressionImpl
 import org.jetbrains.kotlin.ir.symbols.IrValueSymbol
 import org.jetbrains.kotlin.ir.types.IrType
 import org.jetbrains.kotlin.ir.types.isChar
@@ -49,6 +53,8 @@ internal class ComponentEmitter(
 ) {
     /** Element body receivers and `let` parameters, mapped to the locals that replace them. */
     private val substitutions = mutableMapOf<IrValueSymbol, IrVariable>()
+
+    private val unitType = b.context.irBuiltIns.unitType
 
     /** Replaces the body of [fn] with [items], dropping [builderParameter] and returning `ReactNode?`. */
     fun rewrite(
@@ -114,7 +120,39 @@ internal class ComponentEmitter(
                 substitutions[child.parameter.symbol] = local(child.parameter.name.asString(), child.value, out)
                 node(child.items, out)
             }
+            is WhileLoop -> {
+                val list = local("list", b.irJs(symbols, "([])"), out)
+                val body = loopBody(child.items, list)
+                child.loop.body = b.irBlock(resultType = unitType) { body.forEach { +it } }
+                out += child.loop
+                b.irGet(list)
+            }
+            is RepeatLoop -> {
+                val list = local("list", b.irJs(symbols, "([])"), out)
+                val body = loopBody(child.items, list)
+                (child.action.body as IrBlockBody).statements.apply {
+                    clear()
+                    addAll(body)
+                }
+                out += child.call
+                b.irGet(list)
+            }
         }
+
+    /** Emits [items] as a loop body that pushes each child onto [list]. */
+    private fun loopBody(
+        items: List<Item>,
+        list: IrVariable,
+    ): List<IrStatement> {
+        val out = mutableListOf<IrStatement>()
+        val pushed = object : Children() {
+            override fun add(node: IrExpression) {
+                out += dynamic(IrDynamicOperator.INVOKE, b.irGet(list), "push", node)
+            }
+        }
+        items.forEach { emit(it, out, pushed) }
+        return out
+    }
 
     private fun element(element: Element): IrExpression {
         val out = mutableListOf<IrStatement>()
@@ -186,6 +224,29 @@ internal class ComponentEmitter(
             arguments[2] = key ?: b.irNull()
         }
 
+    /** `target.member = argument` or `target.member(argument)` on a JS object. */
+    private fun dynamic(
+        operator: IrDynamicOperator,
+        target: IrExpression,
+        member: String,
+        argument: IrExpression,
+    ): IrExpression =
+        IrDynamicOperatorExpressionImpl(
+            startOffset = UNDEFINED_OFFSET,
+            endOffset = UNDEFINED_OFFSET,
+            type = unitType,
+            operator = operator,
+        ).apply {
+            receiver = IrDynamicMemberExpressionImpl(
+                startOffset = UNDEFINED_OFFSET,
+                endOffset = UNDEFINED_OFFSET,
+                type = symbols.js.owner.returnType,
+                memberName = member,
+                receiver = target,
+            )
+            arguments += argument
+        }
+
     /** [value] itself when re-reading it is safe, otherwise a local holding it, so evaluation order is kept. */
     private fun stable(
         value: IrExpression,
@@ -211,11 +272,11 @@ internal class ComponentEmitter(
 }
 
 /** What a list of items adds: its child nodes, in order, and in an element body the explicit `key`. */
-private class Children {
+private open class Children {
     val nodes = mutableListOf<IrExpression>()
     var key: IrExpression? = null
 
-    fun add(node: IrExpression) {
+    open fun add(node: IrExpression) {
         nodes += node
     }
 }

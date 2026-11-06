@@ -21,6 +21,7 @@ import org.jetbrains.kotlin.ir.expressions.IrTypeOperator
 import org.jetbrains.kotlin.ir.expressions.IrTypeOperatorCall
 import org.jetbrains.kotlin.ir.expressions.IrVararg
 import org.jetbrains.kotlin.ir.expressions.IrWhen
+import org.jetbrains.kotlin.ir.expressions.IrWhileLoop
 import org.jetbrains.kotlin.ir.symbols.IrFunctionSymbol
 import org.jetbrains.kotlin.ir.symbols.IrTypeParameterSymbol
 import org.jetbrains.kotlin.ir.symbols.IrValueSymbol
@@ -39,6 +40,7 @@ import org.jetbrains.kotlin.name.FqName
 
 private val ELEMENT_BUILDER = FqName("react.ElementBuilder")
 private val SET_DEFAULT_KEY = FqName("react.setDefaultKey")
+private val KOTLIN_REPEAT = FqName("kotlin.repeat")
 private val KOTLIN_LET = FqName("kotlin.let")
 
 /**
@@ -61,9 +63,9 @@ internal class ComponentAnalyzer(
 
     /**
      * The statements written against one builder [receiver] in a function [owner]: the component body ([isRoot]),
-     * an element body, or a branch or inline lambda nested in one. Where [allowAttrs], reads of the receiver as
-     * props access the attrs object of the element; in an [isElementBody], `key = ...` becomes the element's `jsx`
-     * key.
+     * an element body, or a branch, loop body or inline lambda nested in one. Where [allowAttrs], reads of the
+     * receiver as props access the attrs object of the element; in an [isElementBody], `key = ...` becomes the
+     * element's `jsx` key.
      */
     private inner class Scope(
         private val receiver: IrValueSymbol,
@@ -103,6 +105,8 @@ internal class ComponentAnalyzer(
             }
             val structure = when {
                 s is IrWhen -> choice(s)
+                s is IrWhileLoop -> whileLoop(s)
+                s is IrCall && s.isInlineBlockCall(KOTLIN_REPEAT) -> repeatLoop(s)
                 s is IrCall && s.isInlineBlockCall(KOTLIN_LET) -> letBlock(s)
                 else -> null
             }
@@ -141,6 +145,20 @@ internal class ComponentAnalyzer(
                 Branch(branch.condition.takeUnless { branch is IrElseBranch }, items)
             }
             return Choice(branches, expression.branches.sumOf { attrsUses(it.condition) })
+        }
+
+        private fun whileLoop(loop: IrWhileLoop): WhileLoop? {
+            if (loop.returnsTo(owner)) return null
+            val items = subScope().analyze(loop.body?.branchStatements() ?: return null) ?: return null
+            return WhileLoop(loop, items, attrsUses(loop.condition))
+        }
+
+        private fun repeatLoop(call: IrCall): RepeatLoop? {
+            val times = call.arguments[0] ?: return null
+            val action = (call.arguments[1] as IrFunctionExpression).function
+            if (action.returnsTo(owner) || times.returnsTo(owner) || times.uses(receiver) != 0) return null
+            val items = subScope(action.symbol).analyze(action.blockStatements() ?: return null) ?: return null
+            return RepeatLoop(call, action, items)
         }
 
         private fun letBlock(call: IrCall): LetBlock? {
