@@ -36,8 +36,8 @@ internal class ComponentLowering(
     }
 
     /** Only a bare component is safe to initialize eagerly; wrappers like `memo(FC { })` run code and stay lazy. */
-    override fun visitProperty(declaration: IrProperty): IrStatement {
-        declaration.transformChildrenVoid(this)
+    override fun visitPropertyNew(declaration: IrProperty): IrStatement {
+        super.visitPropertyNew(declaration)
         if (declaration.backingField?.initializer?.expression in components) {
             declaration.annotations += builder(declaration.symbol).irAnnotation(symbols.eagerInitialization)
         }
