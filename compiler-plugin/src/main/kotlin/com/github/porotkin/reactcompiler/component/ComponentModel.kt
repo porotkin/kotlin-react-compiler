@@ -83,6 +83,13 @@ internal class Element(
     override val receiverUses get() = if (defaultKey != null) 2 else 1
 }
 
+/** A call to a lowered `private fun ChildrenBuilder.Foo(props)` helper in the same file. */
+internal class HelperCall(
+    val call: IrCall,
+) : Child {
+    override val receiverUses get() = 1
+}
+
 /** `child(type, props)`, optionally keyed through `setDefaultKey`. */
 internal class ChildWithProps(
     val type: IrExpression,

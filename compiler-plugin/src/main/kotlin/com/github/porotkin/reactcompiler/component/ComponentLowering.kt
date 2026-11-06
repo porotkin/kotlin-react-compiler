@@ -22,19 +22,22 @@ import org.jetbrains.kotlin.ir.visitors.transformChildrenVoid
 /**
  * Lowers `FC { props -> ... }` from `ChildrenBuilder.(props) -> Unit` into a `(props) -> ReactNode?` function
  * React Compiler can analyze ([ComponentAnalyzer] reads the body, [ComponentEmitter] rewrites it), and marks
- * properties initialized with such a component `@EagerInitialization`.
+ * properties initialized with such a component `@EagerInitialization`. The [ComponentHelpers] these bodies call
+ * are lowered the same way.
  */
 internal class ComponentLowering(
     context: IrPluginContext,
     symbols: ReactSymbols,
 ) : ReactLowering(context, symbols) {
-    private val analyzer = ComponentAnalyzer(symbols)
     private val components = mutableSetOf<IrExpression>()
     private lateinit var fileEntry: IrFileEntry
+    private lateinit var helpers: ComponentHelpers
 
     override fun lower(irFile: IrFile) {
         fileEntry = irFile.fileEntry
+        helpers = ComponentHelpers(irFile, symbols, ::rewrite)
         super.lower(irFile)
+        helpers.install()
     }
 
     /** Only a bare component is safe to initialize eagerly; wrappers like `memo(FC { })` run code and stay lazy. */
@@ -65,7 +68,7 @@ internal class ComponentLowering(
         val builder = fn.parameters.singleOrNull {
             it.kind == IrParameterKind.ExtensionReceiver && it.type.classOrNull == symbols.childrenBuilderClass
         } ?: return false
-        val items = analyzer.analyze(fn, builder.symbol) ?: return false
+        val items = helpers.analyzer.analyze(fn, builder.symbol) ?: return false
         rewrite(fn, builder, items)
         lambda.type = context.irBuiltIns.functionN(fn.parameters.size).typeWith(fn.parameters.map { it.type } + symbols.reactNode)
         return true
@@ -76,6 +79,6 @@ internal class ComponentLowering(
         builderParameter: IrValueParameter,
         items: List<Item>,
     ) {
-        ComponentEmitter(fn, symbols, builder(fn.symbol), fileEntry).rewrite(builderParameter, items)
+        ComponentEmitter(fn, symbols, builder(fn.symbol), fileEntry, helpers::resolve).rewrite(builderParameter, items)
     }
 }

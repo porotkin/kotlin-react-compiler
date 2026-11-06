@@ -34,6 +34,7 @@ import org.jetbrains.kotlin.ir.expressions.IrGetValue
 import org.jetbrains.kotlin.ir.expressions.IrReturn
 import org.jetbrains.kotlin.ir.expressions.impl.IrDynamicMemberExpressionImpl
 import org.jetbrains.kotlin.ir.expressions.impl.IrDynamicOperatorExpressionImpl
+import org.jetbrains.kotlin.ir.symbols.IrSimpleFunctionSymbol
 import org.jetbrains.kotlin.ir.symbols.IrValueSymbol
 import org.jetbrains.kotlin.ir.types.IrType
 import org.jetbrains.kotlin.ir.types.isChar
@@ -43,14 +44,16 @@ import org.jetbrains.kotlin.ir.visitors.IrElementTransformerVoid
 import org.jetbrains.kotlin.ir.visitors.transformChildrenVoid
 
 /**
- * Writes an analyzed component body back as IR for [fn]: `"use memo"`, the [Plain] statements in order,
- * each element as a `jsx(type, attrs, key)` call bound to a local, and a `return` of the root node.
+ * Writes an analyzed body back as IR for [fn]: `"use memo"`, the [Plain] statements in order, each element as a
+ * `jsx(type, attrs, key)` call bound to a local, and a `return` of the root node. Calls to helpers go to the
+ * lowered helper [resolveHelper] returns.
  */
 internal class ComponentEmitter(
     private val fn: IrSimpleFunction,
     private val symbols: ReactSymbols,
     private val b: IrBuilderWithScope,
     private val fileEntry: IrFileEntry,
+    private val resolveHelper: (IrSimpleFunctionSymbol) -> IrSimpleFunctionSymbol,
 ) {
     /** Element body receivers and `let` parameters, mapped to the locals that replace them. */
     private val substitutions = mutableMapOf<IrValueSymbol, IrVariable>()
@@ -124,6 +127,7 @@ internal class ComponentEmitter(
                 val text = if (child.value.type.isChar()) b.irCall(symbols.charToString).apply { arguments[0] = child.value } else child.value
                 stable(text, "text", out)
             }
+            is HelperCall -> b.irGet(local("el", helperCall(child.call), out))
             is ChildWithProps -> b.irGet(local("el", childWithProps(child), out))
             is Element -> b.irGet(local("el", element(child), out))
             is Choice -> b.irGet(local("el", choice(child), out))
@@ -164,6 +168,14 @@ internal class ComponentEmitter(
         items.forEach { emit(it, out, pushed) }
         return out
     }
+
+    private fun helperCall(call: IrCall): IrExpression =
+        b.irCall(resolveHelper(call.symbol), symbols.reactNode).apply {
+            call.typeArguments.forEachIndexed { index, type -> typeArguments[index] = type }
+            for (index in 1 until call.arguments.size) {
+                arguments[index - 1] = call.arguments[index]
+            }
+        }
 
     private fun childWithProps(child: ChildWithProps): IrExpression {
         val out = mutableListOf<IrStatement>()

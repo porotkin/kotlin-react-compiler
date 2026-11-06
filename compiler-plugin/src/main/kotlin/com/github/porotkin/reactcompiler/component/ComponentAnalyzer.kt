@@ -24,6 +24,7 @@ import org.jetbrains.kotlin.ir.expressions.IrVararg
 import org.jetbrains.kotlin.ir.expressions.IrWhen
 import org.jetbrains.kotlin.ir.expressions.IrWhileLoop
 import org.jetbrains.kotlin.ir.symbols.IrFunctionSymbol
+import org.jetbrains.kotlin.ir.symbols.IrSimpleFunctionSymbol
 import org.jetbrains.kotlin.ir.symbols.IrTypeParameterSymbol
 import org.jetbrains.kotlin.ir.symbols.IrValueSymbol
 import org.jetbrains.kotlin.ir.types.classOrNull
@@ -45,12 +46,13 @@ private val KOTLIN_REPEAT = FqName("kotlin.repeat")
 private val KOTLIN_LET = FqName("kotlin.let")
 
 /**
- * Reads a component body written against kotlin-react's `ChildrenBuilder` DSL into the [Item] model.
- * [analyze] returns `null` when the body uses the builder in a shape [ComponentEmitter] cannot reproduce,
- * which leaves the component untouched.
+ * Reads a body written against kotlin-react's `ChildrenBuilder` DSL into the [Item] model, reading calls to
+ * [helpers] on the builder as children. [analyze] returns `null` when the body uses the builder in a shape
+ * [ComponentEmitter] cannot reproduce, which leaves the body untouched.
  */
 internal class ComponentAnalyzer(
     private val symbols: ReactSymbols,
+    private val helpers: Set<IrSimpleFunctionSymbol>,
 ) {
     /** Reads the body of [function], whose parameter [builder] is the `ChildrenBuilder`. */
     fun analyze(
@@ -130,6 +132,7 @@ internal class ComponentAnalyzer(
                 when {
                     s.isUnaryPlus() -> return Text(s.arguments[1]!!)
                     s.isChildWithProps() -> return childWithProps(s, null)
+                    s.symbol in helpers -> return HelperCall(s)
                     isElementBody && s.isKeySetter() && s.arguments.last()!!.uses(receiver) == 0 -> return KeyProp(s.arguments.last()!!)
                 }
             }
