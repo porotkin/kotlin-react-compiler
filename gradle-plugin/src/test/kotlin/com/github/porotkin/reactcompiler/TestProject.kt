@@ -106,17 +106,33 @@ private val REACT_STUBS =
 
     external interface ReactNode
 
-    interface Props
+    interface Props {
+        var key: Any?
+            get() = null
+            set(_) {}
 
-    interface PropsWithChildren : Props {
+        operator fun Props.unaryPlus() {}
+    }
+
+    fun Props.css(block: Props.() -> Unit) {
+        block()
+    }
+
+    interface PropsWithChildren : Props, ChildrenBuilder {
         var children: Any?
     }
 
-    interface FragmentProps : PropsWithChildren, ChildrenBuilder
+    interface PropsWithValue<T> : PropsWithChildren {
+        var value: T
+    }
+
+    interface FragmentProps : PropsWithChildren
 
     external interface ElementType<P : Props>
 
     external interface FC<P : Props> : ElementType<P>
+
+    external interface Provider<T> : ElementType<PropsWithValue<T>>
 
     @JsModule("react")
     external object ReactModule {
@@ -129,15 +145,36 @@ private val REACT_STUBS =
 
     interface ChildrenBuilder {
         @ElementBuilder
+        operator fun <P : Props> ElementType<P>.invoke() {}
+
+        @ElementBuilder
         operator fun <P : Props> ElementType<P>.invoke(block: P.() -> Unit) {}
 
+        @ElementBuilder
+        operator fun <T> Provider<T>.invoke(
+            value: T,
+            block: ChildrenBuilder.() -> Unit,
+        ) {}
+
         operator fun String.unaryPlus() {}
+
+        operator fun Char.unaryPlus() {}
+
+        fun <P : Props> child(
+            type: ElementType<P>,
+            props: P,
+        ) {}
     }
 
     fun ChildrenBuilder.setDefaultKey(key: String) {}
 
-    fun <P : Props> FC(block: ChildrenBuilder.(props: P) -> Unit): FC<P> =
-        block.unsafeCast<FC<P>>()
+    @Suppress("NOTHING_TO_INLINE")
+    inline fun <P : Props> FC(
+        crossinline block: ChildrenBuilder.(props: P) -> Unit,
+    ): FC<P> =
+        ({ props: P ->
+            Fragment.unsafeCast<ChildrenBuilder>().block(props)
+        }).unsafeCast<FC<P>>()
 
     fun <P : Props> memo(type: FC<P>): FC<P> =
         type
@@ -175,5 +212,5 @@ private val REACT_JSX_STUBS =
     import react.ReactNode
 
     fun <P : Props> jsx(type: ElementType<P>, props: P?, defaultKey: Any?): ReactNode =
-        type.unsafeCast<ReactNode>()
+        js("({ type: type, props: props, key: (props != null && props.key != null) ? props.key : defaultKey })").unsafeCast<ReactNode>()
     """.trimIndent() + "\n"
