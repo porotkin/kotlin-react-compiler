@@ -161,13 +161,21 @@ internal class ComponentAnalyzer(
             // The type, props and body move into code of their own, so they must not read this builder, use defaults, or pass varargs.
             if (call.arguments.withIndex().any { (index, arg) -> arg == null || arg is IrVararg || index != 0 && arg.uses(receiver) != 0 }) return null
             if (call.arguments.size == 2) {
-                return Element(call, defaultKey, null, call.typeArguments[0] ?: return null, emptyList())
+                return Element(call, defaultKey, emptyList(), null, call.typeArguments[0] ?: return null, emptyList())
             }
             val block = (call.arguments.last() as? IrFunctionExpression)?.function ?: return null
             val bodyReceiver = block.parameters.singleOrNull() ?: return null
-            val items = Scope(bodyReceiver.symbol, block.symbol, isRoot = false, isTail = true, allowAttrs = true, isElementBody = true)
+            val props = (2 until call.arguments.lastIndex).map { index ->
+                PropArg(
+                    name = call.symbol.owner.parameters[index].name.asString(),
+                    value = call.arguments[index] ?: return null,
+                )
+            }
+            // A `provider(value) { }` body only adds children; a `type { }` body may also set props on the attrs object.
+            val allowAttrs = props.isEmpty() && bodyReceiver.type.classOrNull != symbols.childrenBuilderClass
+            val items = Scope(bodyReceiver.symbol, block.symbol, isRoot = false, isTail = true, allowAttrs, isElementBody = allowAttrs)
                 .analyze(block.blockStatements() ?: return null) ?: return null
-            return Element(call, defaultKey, bodyReceiver.symbol, bodyReceiver.type, items)
+            return Element(call, defaultKey, props, bodyReceiver.symbol, bodyReceiver.type, items)
         }
 
         private fun childWithProps(
@@ -249,10 +257,10 @@ internal class ComponentAnalyzer(
             return then to orElse
         }
 
-        /** `type { }` / `type()`: an element `invoke` on this scope's builder. */
+        /** `type { }` / `type()` / `provider(value) { }`: an element `invoke` on this scope's builder. */
         private fun IrCall.isElementInvoke(): Boolean =
             symbol.owner.name.asString() == "invoke" &&
-                arguments.size in 2..3 &&
+                arguments.size in 2..4 &&
                 isOnReceiver() &&
                 arguments[1]?.type?.isSubtypeOfClass(symbols.elementTypeClass) == true &&
                 symbol.owner.allOverridden(includeSelf = true).any { it.hasAnnotation(ELEMENT_BUILDER) }

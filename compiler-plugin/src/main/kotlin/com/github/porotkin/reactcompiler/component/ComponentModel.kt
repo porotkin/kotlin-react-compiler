@@ -63,10 +63,18 @@ internal class Text(
     override val receiverUses get() = 1
 }
 
-/** `type()` or `type { ... }`, optionally keyed through `setDefaultKey`. */
+/** A prop passed as an argument to an element `invoke`, set dynamically by [name]. */
+internal class PropArg(
+    val name: String,
+    val value: IrExpression,
+)
+
+/** `type()`, `type { ... }` or `provider(value) { ... }`, optionally keyed through `setDefaultKey`. */
 internal class Element(
     val call: IrCall,
     val defaultKey: IrExpression?,
+    /** Props passed as arguments: the `value` of `provider(value) { ... }`. */
+    val props: List<PropArg>,
     /** The receiver of the element body, read as the element's attrs object; `null` without a body. */
     val receiver: IrValueSymbol?,
     val propsType: IrType,

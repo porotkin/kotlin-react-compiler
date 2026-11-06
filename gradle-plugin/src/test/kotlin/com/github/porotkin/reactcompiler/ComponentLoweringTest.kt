@@ -35,6 +35,35 @@ class ComponentLoweringTest : PluginTest() {
     }
 
     @Test
+    fun `sets a provider value and element props on the attrs object`() {
+        val mjs = compile(
+            """
+            interface StateProps : PropsWithChildren {
+                var value: Int
+                var setter: (Int) -> Unit
+            }
+
+            val ThemeContext: Provider<String> = "ThemeContext".unsafeCast<Provider<String>>()
+            val StateContext: ElementType<StateProps> = "StateContext".unsafeCast<ElementType<StateProps>>()
+
+            val Themed: FC<Props> = FC { props ->
+                val theme = props.asDynamic().theme as String
+                ThemeContext(theme) {
+                    StateContext {
+                        value = 1
+                        setter = {}
+                    }
+                }
+            }
+            """,
+        )
+
+        assertTrue(Regex("""attrs\w*\.value = theme;""") in mjs, "Expected Provider value set on attrs in:\n$mjs")
+        assertTrue(Regex("""attrs\w*\.set_value_[\w$]+\(1\);""") in mjs, "Expected element prop set on attrs in:\n$mjs")
+        assertTrue(Regex("""attrs\w*\.set_setter_[\w$]+\(""") in mjs, "Expected element prop set on attrs in:\n$mjs")
+    }
+
+    @Test
     fun `reads statements on the attrs object in an element body`() {
         val mjs = compile(
             """

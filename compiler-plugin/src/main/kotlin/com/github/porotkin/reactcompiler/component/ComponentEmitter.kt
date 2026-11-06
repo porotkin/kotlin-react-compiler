@@ -37,6 +37,7 @@ import org.jetbrains.kotlin.ir.expressions.impl.IrDynamicOperatorExpressionImpl
 import org.jetbrains.kotlin.ir.symbols.IrValueSymbol
 import org.jetbrains.kotlin.ir.types.IrType
 import org.jetbrains.kotlin.ir.types.isChar
+import org.jetbrains.kotlin.ir.util.isSubtypeOfClass
 import org.jetbrains.kotlin.ir.util.patchDeclarationParents
 import org.jetbrains.kotlin.ir.visitors.IrElementTransformerVoid
 import org.jetbrains.kotlin.ir.visitors.transformChildrenVoid
@@ -175,19 +176,26 @@ internal class ComponentEmitter(
     private fun element(element: Element): IrExpression {
         val out = mutableListOf<IrStatement>()
         val type = stable(element.call.arguments[1]!!, "type", out)
+        val props = element.props.map { prop -> PropArg(prop.name, stable(prop.value, prop.name, out)) }
+        // Only `provider(value) { }` sets props dynamically by name and has `ChildrenBuilder` as `element.propsType`.
+        val attrsType = if (element.propsType.isSubtypeOfClass(symbols.propsClass)) element.propsType else symbols.fragmentProps
         // Created at its first use, or once the children are built, so it stays out of the code that builds them.
         val attrs = lazy {
-            local("attrs", b.irImplicitCast(b.irJs(symbols, "({})"), element.propsType), out).also { attrs ->
+            local("attrs", b.irImplicitCast(b.irJs(symbols, "({})"), attrsType), out).also { attrs ->
                 element.receiver?.let { substitutions[it] = attrs }
+                for (prop in props) {
+                    out += dynamic(IrDynamicOperator.EQ, b.irGet(attrs), prop.name, prop.value)
+                }
             }
         }
+        if (props.isNotEmpty()) attrs.value
         val children = Children()
         for (item in element.items) {
             if (item.attrsUses > 0) attrs.value
             emit(item, out, children)
         }
         setChildren(attrs.value, children.nodes, out)
-        out += jsx(type, b.irGet(attrs.value), element.propsType, children.key ?: element.defaultKey ?: sourceKey(element.call))
+        out += jsx(type, b.irGet(attrs.value), attrsType, children.key ?: element.defaultKey ?: sourceKey(element.call))
         return block(out)
     }
 
