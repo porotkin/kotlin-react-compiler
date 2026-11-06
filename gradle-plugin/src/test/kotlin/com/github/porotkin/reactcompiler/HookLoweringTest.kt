@@ -1,5 +1,6 @@
 package com.github.porotkin.reactcompiler
 
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
@@ -20,10 +21,17 @@ class HookLoweringTest : PluginTest() {
         val mjs = compile(
             """
             fun <T> useList(vararg elements: T): List<T> = useMemo(*elements) { elements.asList() }
+
+            suspend fun useSuspended(): Int = 42
+
+            class Holder {
+                fun useMember(): Int = 1
+            }
             """,
         )
 
         assertTrue("return useMemo(tmp, useList\$lambda(elements));" in mjs, "Expected spread useMemo left as is in:\n$mjs")
+        assertFalse("'use memo';" in mjs, "Expected no 'use memo' in spread/suspend/member hooks in:\n$mjs")
     }
 
     @Test
