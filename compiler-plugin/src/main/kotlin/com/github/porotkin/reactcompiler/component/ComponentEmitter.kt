@@ -32,6 +32,7 @@ import org.jetbrains.kotlin.ir.expressions.IrGetValue
 import org.jetbrains.kotlin.ir.expressions.IrReturn
 import org.jetbrains.kotlin.ir.symbols.IrValueSymbol
 import org.jetbrains.kotlin.ir.types.IrType
+import org.jetbrains.kotlin.ir.types.isChar
 import org.jetbrains.kotlin.ir.util.patchDeclarationParents
 import org.jetbrains.kotlin.ir.visitors.IrElementTransformerVoid
 import org.jetbrains.kotlin.ir.visitors.transformChildrenVoid
@@ -103,7 +104,10 @@ internal class ComponentEmitter(
         out: MutableList<IrStatement>,
     ): IrExpression =
         when (child) {
-            is Text -> stable(child.value, "text", out)
+            is Text -> {
+                val text = if (child.value.type.isChar()) b.irCall(symbols.charToString).apply { arguments[0] = child.value } else child.value
+                stable(text, "text", out)
+            }
             is Element -> b.irGet(local("el", element(child), out))
             is Choice -> b.irGet(local("el", choice(child), out))
         }

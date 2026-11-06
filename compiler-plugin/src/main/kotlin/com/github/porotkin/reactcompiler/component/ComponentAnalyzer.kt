@@ -26,7 +26,6 @@ import org.jetbrains.kotlin.ir.symbols.IrTypeParameterSymbol
 import org.jetbrains.kotlin.ir.symbols.IrValueSymbol
 import org.jetbrains.kotlin.ir.types.classOrNull
 import org.jetbrains.kotlin.ir.types.classifierOrNull
-import org.jetbrains.kotlin.ir.types.isChar
 import org.jetbrains.kotlin.ir.types.isUnit
 import org.jetbrains.kotlin.ir.util.allOverridden
 import org.jetbrains.kotlin.ir.util.fqNameWhenAvailable
@@ -96,7 +95,7 @@ internal class ComponentAnalyzer(
             if (s is IrCall && s.isElementInvoke()) return element(s, null)
             if (s is IrCall && s.isOnReceiver()) {
                 when {
-                    s.isUnaryPlus() -> return Text(s.arguments[1]!!).takeUnless { s.symbol.owner.parameters[1].type.isChar() }
+                    s.isUnaryPlus() -> return Text(s.arguments[1]!!)
                     isElementBody && s.isKeySetter() && s.arguments.last()!!.uses(receiver) == 0 -> return KeyProp(s.arguments.last()!!)
                 }
             }

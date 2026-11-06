@@ -145,6 +145,33 @@ class ComponentLoweringTest : PluginTest() {
     }
 
     @Test
+    fun `lowers when with subject variable and char unaryPlus`() {
+        val mjs = compile(
+            """
+            interface ItemProps : FragmentProps {
+                var items: List<String>
+                var delimiter: Char
+            }
+
+            val div: ElementType<ItemProps> = "div".unsafeCast<ElementType<ItemProps>>()
+
+            val SubjectWhen: FC<ItemProps> = FC { props ->
+                div {
+                    when (val count = props.items.size) {
+                        0 -> +props.delimiter
+                        else -> +count.toString()
+                    }
+                }
+            }
+            """,
+        )
+
+        assertTrue("function SubjectWhen\$lambda(props)" in mjs, "Expected SubjectWhen lowered in:\n$mjs")
+        assertTrue(Regex("""var count = props\.get_items_[\w$]+\(\)\.get_size_[\w$]+\(\);""") in mjs, "Expected subject variable emitted before branch in:\n$mjs")
+        assertTrue(Regex("""var text = toString[_0-9]*\(props\.get_delimiter_[\w$]+\(\)\);""") in mjs, "Expected Char converted via toString in:\n$mjs")
+    }
+
+    @Test
     fun `keeps conditional key assignment inside a child-adding branch on attrs instead of hoisting`() {
         val mjs = compile(
             """
