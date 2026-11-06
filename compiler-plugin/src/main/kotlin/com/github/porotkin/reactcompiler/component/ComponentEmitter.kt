@@ -47,7 +47,7 @@ internal class ComponentEmitter(
     private val b: IrBuilderWithScope,
     private val fileEntry: IrFileEntry,
 ) {
-    /** Element body receivers, mapped to the locals that replace them. */
+    /** Element body receivers and `let` parameters, mapped to the locals that replace them. */
     private val substitutions = mutableMapOf<IrValueSymbol, IrVariable>()
 
     /** Replaces the body of [fn] with [items], dropping [builderParameter] and returning `ReactNode?`. */
@@ -110,6 +110,10 @@ internal class ComponentEmitter(
             }
             is Element -> b.irGet(local("el", element(child), out))
             is Choice -> b.irGet(local("el", choice(child), out))
+            is LetBlock -> {
+                substitutions[child.parameter.symbol] = local(child.parameter.name.asString(), child.value, out)
+                node(child.items, out)
+            }
         }
 
     private fun element(element: Element): IrExpression {

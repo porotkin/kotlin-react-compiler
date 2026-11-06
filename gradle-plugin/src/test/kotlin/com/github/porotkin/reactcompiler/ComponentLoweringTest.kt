@@ -65,6 +65,34 @@ class ComponentLoweringTest : PluginTest() {
     }
 
     @Test
+    fun `binds a safe-call let parameter to a local and an implicit-cast element receiver to attrs`() {
+        val mjs = compile(
+            """
+            interface ItemProps : FragmentProps {
+                var title: String?
+            }
+
+            val span: ElementType<ItemProps> = "span".unsafeCast<ElementType<ItemProps>>()
+
+            val <P : Props> ElementType<P>.truncated: ElementType<P>
+                get() = this
+
+            val LetView: FC<ItemProps> = FC { props ->
+                props.title?.let { text ->
+                    span.truncated {
+                        title = text
+                    }
+                }
+            }
+            """,
+        )
+
+        assertTrue("function LetView\$lambda(props)" in mjs, "Expected LetView lowered in:\n$mjs")
+        assertTrue("var text = tmp0_safe_receiver;" in mjs, "Expected let parameter bound to local in:\n$mjs")
+        assertTrue(Regex("""attrs\.set_title_[\w$]+\(text\);""") in mjs, "Expected implicit-cast receiver remapped to attrs in:\n$mjs")
+    }
+
+    @Test
     fun `returns null from an early return after hooks`() {
         val mjs = compile(
             """

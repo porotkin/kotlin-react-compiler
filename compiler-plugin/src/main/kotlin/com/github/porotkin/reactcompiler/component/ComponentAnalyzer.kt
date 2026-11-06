@@ -39,6 +39,7 @@ import org.jetbrains.kotlin.name.FqName
 
 private val ELEMENT_BUILDER = FqName("react.ElementBuilder")
 private val SET_DEFAULT_KEY = FqName("react.setDefaultKey")
+private val KOTLIN_LET = FqName("kotlin.let")
 
 /**
  * Reads a component body written against kotlin-react's `ChildrenBuilder` DSL into the [Item] model.
@@ -60,8 +61,9 @@ internal class ComponentAnalyzer(
 
     /**
      * The statements written against one builder [receiver] in a function [owner]: the component body ([isRoot]),
-     * an element body, or a branch nested in one. Where [allowAttrs], reads of the receiver as props access the
-     * attrs object of the element; in an [isElementBody], `key = ...` becomes the element's `jsx` key.
+     * an element body, or a branch or inline lambda nested in one. Where [allowAttrs], reads of the receiver as
+     * props access the attrs object of the element; in an [isElementBody], `key = ...` becomes the element's `jsx`
+     * key.
      */
     private inner class Scope(
         private val receiver: IrValueSymbol,
@@ -101,6 +103,7 @@ internal class ComponentAnalyzer(
             }
             val structure = when {
                 s is IrWhen -> choice(s)
+                s is IrCall && s.isInlineBlockCall(KOTLIN_LET) -> letBlock(s)
                 else -> null
             }
             // A structure that adds no children, or one that cannot be read, stays a plain statement. If it does add
@@ -111,7 +114,7 @@ internal class ComponentAnalyzer(
         private fun plain(statement: IrStatement): Plain =
             Plain(statement, attrsUses(statement))
 
-        private fun subScope(): Scope =
+        private fun subScope(owner: IrFunctionSymbol = this.owner): Scope =
             Scope(receiver, owner, isRoot = false, allowAttrs, isElementBody = false)
 
         private fun element(
@@ -138,6 +141,15 @@ internal class ComponentAnalyzer(
                 Branch(branch.condition.takeUnless { branch is IrElseBranch }, items)
             }
             return Choice(branches, expression.branches.sumOf { attrsUses(it.condition) })
+        }
+
+        private fun letBlock(call: IrCall): LetBlock? {
+            val value = call.arguments[0] ?: return null
+            val action = (call.arguments[1] as IrFunctionExpression).function
+            val parameter = action.parameters.singleOrNull() ?: return null
+            if (action.returnsTo(owner) || value.returnsTo(owner) || value.uses(receiver) != 0) return null
+            val items = subScope(action.symbol).analyze(action.blockStatements() ?: return null) ?: return null
+            return LetBlock(value, parameter, items)
         }
 
         /** `type { }` / `type()`: an element `invoke` on this scope's builder. */
@@ -235,6 +247,9 @@ internal class ComponentAnalyzer(
 
 private fun IrFunction.blockStatements(): List<IrStatement>? =
     (body as? IrBlockBody)?.statements
+
+private fun IrCall.isInlineBlockCall(function: FqName): Boolean =
+    symbol.owner.fqNameWhenAvailable == function && arguments.size == 2 && arguments[1] is IrFunctionExpression
 
 private fun IrCall.isKeySetter(): Boolean {
     val property = symbol.owner.correspondingPropertySymbol?.owner ?: return false
