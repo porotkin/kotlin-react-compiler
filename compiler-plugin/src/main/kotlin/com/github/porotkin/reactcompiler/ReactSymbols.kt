@@ -1,6 +1,7 @@
 package com.github.porotkin.reactcompiler
 
 import org.jetbrains.kotlin.backend.common.extensions.DeclarationFinder
+import org.jetbrains.kotlin.ir.symbols.IrClassSymbol
 import org.jetbrains.kotlin.ir.symbols.IrConstructorSymbol
 import org.jetbrains.kotlin.ir.symbols.IrSimpleFunctionSymbol
 import org.jetbrains.kotlin.ir.types.IrType
@@ -27,6 +28,10 @@ internal class ReactSymbols private constructor(
     val fragment = finder.findProperties(callable(REACT, "Fragment")).single().owner.getter!!.symbol
     val fragmentProps = classType(FRAGMENT_PROPS)
     val reactNode = classType(classId(REACT, "ReactNode")).makeNullable()
+    val propsClass = classSymbol(classId(REACT, "Props"))
+    val propsWithChildrenClass = classSymbol(classId(REACT, "PropsWithChildren"))
+    val childrenBuilderClass = classSymbol(classId(REACT, "ChildrenBuilder"))
+    val elementTypeClass = classSymbol(classId(REACT, "ElementType"))
     val childrenSetter = finder
         .findProperties(CallableId(classId(REACT, "PropsWithChildren"), Name.identifier("children")))
         .single().owner.setter!!.symbol
@@ -46,8 +51,11 @@ internal class ReactSymbols private constructor(
         },
     ).flatMap { (sources, target) -> sources.map { it to target } }.toMap()
 
+    private fun classSymbol(id: ClassId): IrClassSymbol =
+        finder.findClass(id) ?: missing(id.asFqNameString())
+
     private fun classType(id: ClassId): IrType =
-        finder.findClass(id)?.owner?.defaultType ?: missing(id.asFqNameString())
+        classSymbol(id).owner.defaultType
 
     private fun function(
         packageName: FqName,

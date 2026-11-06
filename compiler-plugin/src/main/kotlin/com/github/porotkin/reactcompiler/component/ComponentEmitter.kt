@@ -20,15 +20,19 @@ import org.jetbrains.kotlin.ir.builders.irString
 import org.jetbrains.kotlin.ir.builders.irVararg
 import org.jetbrains.kotlin.ir.builders.irWhen
 import org.jetbrains.kotlin.ir.declarations.IrSimpleFunction
+import org.jetbrains.kotlin.ir.declarations.IrValueParameter
 import org.jetbrains.kotlin.ir.declarations.IrVariable
+import org.jetbrains.kotlin.ir.expressions.IrBlockBody
 import org.jetbrains.kotlin.ir.expressions.IrCall
 import org.jetbrains.kotlin.ir.expressions.IrConst
-import org.jetbrains.kotlin.ir.expressions.IrElseBranch
 import org.jetbrains.kotlin.ir.expressions.IrExpression
 import org.jetbrains.kotlin.ir.expressions.IrFunctionExpression
 import org.jetbrains.kotlin.ir.expressions.IrGetObjectValue
 import org.jetbrains.kotlin.ir.expressions.IrGetValue
 import org.jetbrains.kotlin.ir.expressions.IrReturn
+import org.jetbrains.kotlin.ir.symbols.IrValueSymbol
+import org.jetbrains.kotlin.ir.types.IrType
+import org.jetbrains.kotlin.ir.util.patchDeclarationParents
 import org.jetbrains.kotlin.ir.visitors.IrElementTransformerVoid
 import org.jetbrains.kotlin.ir.visitors.transformChildrenVoid
 
@@ -42,39 +46,55 @@ internal class ComponentEmitter(
     private val b: IrBuilderWithScope,
     private val fileEntry: IrFileEntry,
 ) {
-    fun emit(items: List<Item>): List<IrStatement> {
+    /** Element body receivers, mapped to the locals that replace them. */
+    private val substitutions = mutableMapOf<IrValueSymbol, IrVariable>()
+
+    /** Replaces the body of [fn] with [items], dropping [builderParameter] and returning `ReactNode?`. */
+    fun rewrite(
+        builderParameter: IrValueParameter,
+        items: List<Item>,
+    ) {
+        fn.parameters -= builderParameter
+        fn.returnType = symbols.reactNode
         val out = mutableListOf<IrStatement>(b.irUseMemo(symbols))
-        val returnsNull = object : IrElementTransformerVoid() {
-            override fun visitReturn(expression: IrReturn): IrExpression {
-                expression.transformChildrenVoid(this)
-                return if (expression.returnTargetSymbol == fn.symbol) b.irReturn(b.irNull(symbols.reactNode)) else expression
-            }
+        out += b.irReturn(node(items.filterNot { it is Plain && it.statement.isUseMemo(symbols) }, out))
+        val substitute = object : IrElementTransformerVoid() {
+            override fun visitGetValue(expression: IrGetValue): IrExpression =
+                substitutions[expression.symbol]?.let(b::irGet) ?: expression
         }
-        val children = emitItems(
-            items = items
-                .filterNot { it is Plain && it.statement.isUseMemo(symbols) }
-                .map { if (it is Plain) Plain(it.statement.transform(returnsNull, null) as IrStatement) else it },
-            out = out,
-            props = null,
-        )
-        out += b.irReturn(root(children, out))
-        return out
+        val body = fn.body as IrBlockBody
+        body.statements.clear()
+        out.mapTo(body.statements) { it.transform(substitute, null) as IrStatement }
+        body.patchDeclarationParents(fn)
     }
 
-    private fun emitItems(
+    /** Emits [items] into [out] and returns the node they build: `null`, their only child, or a Fragment of them. */
+    private fun node(
         items: List<Item>,
         out: MutableList<IrStatement>,
-        props: MutableList<Pair<IrCall, IrExpression>>?,
-    ): List<IrExpression> {
-        val children = mutableListOf<IrExpression>()
-        for (item in items) {
-            when (item) {
-                is Plain -> out += item.statement
-                is Prop -> props!! += item.setter to stable(item.setter.arguments.last()!!, item.setter.propertyName(), out)
-                is Slot -> children += child(item.child, out)
-            }
+    ): IrExpression {
+        val children = Children()
+        items.forEach { emit(it, out, children) }
+        return nodeOf(children.nodes, out)
+    }
+
+    private fun emit(
+        item: Item,
+        out: MutableList<IrStatement>,
+        children: Children,
+    ) {
+        when (item) {
+            is Plain -> out += item.statement.transform(returnsNull, null) as IrStatement
+            is Child -> children.add(child(item, out))
         }
-        return children
+    }
+
+    /** A return from the component now returns no node. */
+    private val returnsNull = object : IrElementTransformerVoid() {
+        override fun visitReturn(expression: IrReturn): IrExpression {
+            expression.transformChildrenVoid(this)
+            return if (expression.returnTargetSymbol == fn.symbol) b.irReturn(b.irNull(symbols.reactNode)) else expression
+        }
     }
 
     private fun child(
@@ -90,30 +110,34 @@ internal class ComponentEmitter(
     private fun element(element: Element): IrExpression {
         val out = mutableListOf<IrStatement>()
         val type = stable(element.call.arguments[1]!!, "type", out)
-        val props = mutableListOf<Pair<IrCall, IrExpression>>()
-        val children = emitItems(element.items, out, props)
-        val attrs = local("attrs", b.irImplicitCast(b.irJs(symbols, "({})"), element.propsType), out)
-        for ((setter, value) in props) {
-            setter.arguments[0] = b.irGet(attrs)
-            setter.arguments[setter.arguments.lastIndex] = value
-            out += setter
+        // Created at its first use, or once the children are built, so it stays out of the code that builds them.
+        val attrs = lazy {
+            local("attrs", b.irImplicitCast(b.irJs(symbols, "({})"), element.propsType), out).also { attrs ->
+                element.receiver?.let { substitutions[it] = attrs }
+            }
         }
-        setChildren(attrs, children, out)
-        out += jsx(type, attrs, element.defaultKey ?: sourceKey(element.call))
+        val children = Children()
+        for (item in element.items) {
+            if (item.attrsUses > 0) attrs.value
+            emit(item, out, children)
+        }
+        setChildren(attrs.value, children.nodes, out)
+        out += jsx(type, b.irGet(attrs.value), element.propsType, element.defaultKey ?: sourceKey(element.call))
         return block(out)
     }
 
     private fun choice(choice: Choice): IrExpression {
-        val branches = choice.expression.branches.zip(choice.branches) { branch, items ->
+        val branches = choice.branches.map { branch ->
             val out = mutableListOf<IrStatement>()
-            out += emitItems(items, out, null).singleOrNull() ?: b.irNull(symbols.reactNode)
-            if (branch is IrElseBranch) b.irElseBranch(block(out)) else b.irBranch(branch.condition, block(out))
+            out += node(branch.items, out)
+            val condition = branch.condition
+            if (condition == null) b.irElseBranch(block(out)) else b.irBranch(condition, block(out))
         }
-        val fallback = listOfNotNull(b.irElseBranch(b.irNull(symbols.reactNode)).takeIf { branches.last() !is IrElseBranch })
+        val fallback = listOfNotNull(b.irElseBranch(b.irNull(symbols.reactNode)).takeIf { choice.branches.last().condition != null })
         return b.irWhen(symbols.reactNode, branches + fallback)
     }
 
-    private fun root(
+    private fun nodeOf(
         children: List<IrExpression>,
         out: MutableList<IrStatement>,
     ): IrExpression =
@@ -123,7 +147,7 @@ internal class ComponentEmitter(
             else -> {
                 val attrs = local("attrs", b.irImplicitCast(b.irJs(symbols, "({})"), symbols.fragmentProps), out)
                 setChildren(attrs, children, out)
-                jsx(b.irCall(symbols.fragment), attrs, null)
+                jsx(b.irCall(symbols.fragment), b.irGet(attrs), attrs.type, null)
             }
         }
 
@@ -141,13 +165,14 @@ internal class ComponentEmitter(
 
     private fun jsx(
         type: IrExpression,
-        attrs: IrVariable,
+        props: IrExpression,
+        propsType: IrType,
         key: IrExpression?,
     ): IrExpression =
         b.irCall(symbols.jsx, symbols.reactNode).apply {
-            typeArguments[0] = attrs.type
+            typeArguments[0] = propsType
             arguments[0] = type
-            arguments[1] = b.irGet(attrs)
+            arguments[1] = props
             // An unset argument means "omitted", which fails to link: kotlin-react's `jsx` has no default `defaultKey`.
             arguments[2] = key ?: b.irNull()
         }
@@ -176,8 +201,14 @@ internal class ComponentEmitter(
     }
 }
 
-private fun IrCall.propertyName(): String =
-    symbol.owner.correspondingPropertySymbol!!.owner.name.asString()
+/** What a list of items adds: its child nodes, in order. */
+private class Children {
+    val nodes = mutableListOf<IrExpression>()
+
+    fun add(node: IrExpression) {
+        nodes += node
+    }
+}
 
 private fun IrExpression.isStable(): Boolean =
     when (this) {

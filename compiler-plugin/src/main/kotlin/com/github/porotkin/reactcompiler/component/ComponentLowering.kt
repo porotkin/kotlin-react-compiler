@@ -10,12 +10,13 @@ import org.jetbrains.kotlin.ir.builders.irImplicitCast
 import org.jetbrains.kotlin.ir.declarations.IrFile
 import org.jetbrains.kotlin.ir.declarations.IrParameterKind
 import org.jetbrains.kotlin.ir.declarations.IrProperty
-import org.jetbrains.kotlin.ir.expressions.IrBlockBody
+import org.jetbrains.kotlin.ir.declarations.IrSimpleFunction
+import org.jetbrains.kotlin.ir.declarations.IrValueParameter
 import org.jetbrains.kotlin.ir.expressions.IrCall
 import org.jetbrains.kotlin.ir.expressions.IrExpression
 import org.jetbrains.kotlin.ir.expressions.IrFunctionExpression
+import org.jetbrains.kotlin.ir.types.classOrNull
 import org.jetbrains.kotlin.ir.types.typeWith
-import org.jetbrains.kotlin.ir.util.patchDeclarationParents
 import org.jetbrains.kotlin.ir.visitors.transformChildrenVoid
 
 /**
@@ -27,6 +28,7 @@ internal class ComponentLowering(
     context: IrPluginContext,
     symbols: ReactSymbols,
 ) : ReactLowering(context, symbols) {
+    private val analyzer = ComponentAnalyzer(symbols)
     private val components = mutableSetOf<IrExpression>()
     private lateinit var fileEntry: IrFileEntry
 
@@ -47,26 +49,33 @@ internal class ComponentLowering(
     override fun visitCall(expression: IrCall): IrExpression {
         expression.transformChildrenVoid(this)
         if (expression.symbol !in symbols.componentFactories) return expression
-        return lowerComponent(expression) ?: expression
+        return lowerFactoryCall(expression)
     }
 
-    private fun lowerComponent(call: IrCall): IrExpression? {
-        val lambda = call.arguments[0] as? IrFunctionExpression ?: return null
+    /** `FC { }` with a lowerable lambda. */
+    private fun lowerFactoryCall(call: IrCall): IrExpression {
+        val argument = call.arguments[0]
+        if (argument !is IrFunctionExpression || !lowerLambda(argument)) return call
+        return builder(call.symbol).irImplicitCast(argument, call.type).also(components::add)
+    }
+
+    /** Rewrites a `ChildrenBuilder.(props) -> Unit` lambda into a `(props) -> ReactNode?` one, if its body can be. */
+    private fun lowerLambda(lambda: IrFunctionExpression): Boolean {
         val fn = lambda.function
-        val body = fn.body as? IrBlockBody ?: return null
-        val builderParameter = fn.parameters.singleOrNull { it.kind == IrParameterKind.ExtensionReceiver } ?: return null
-        val items = ComponentAnalyzer.analyze(body, builderParameter.symbol, fn.symbol) ?: return null
+        val builder = fn.parameters.singleOrNull {
+            it.kind == IrParameterKind.ExtensionReceiver && it.type.classOrNull == symbols.childrenBuilderClass
+        } ?: return false
+        val items = analyzer.analyze(fn, builder.symbol) ?: return false
+        rewrite(fn, builder, items)
+        lambda.type = context.irBuiltIns.functionN(fn.parameters.size).typeWith(fn.parameters.map { it.type } + symbols.reactNode)
+        return true
+    }
 
-        fn.parameters -= builderParameter
-        fn.returnType = symbols.reactNode
-        lambda.type = context.irBuiltIns.functionN(fn.parameters.size)
-            .typeWith(fn.parameters.map { it.type } + symbols.reactNode)
-
-        val statements = ComponentEmitter(fn, symbols, builder(fn.symbol), fileEntry).emit(items)
-        body.statements.clear()
-        body.statements += statements
-        body.patchDeclarationParents(fn)
-
-        return builder(fn.symbol).irImplicitCast(lambda, call.type).also(components::add)
+    private fun rewrite(
+        fn: IrSimpleFunction,
+        builderParameter: IrValueParameter,
+        items: List<Item>,
+    ) {
+        ComponentEmitter(fn, symbols, builder(fn.symbol), fileEntry).rewrite(builderParameter, items)
     }
 }
