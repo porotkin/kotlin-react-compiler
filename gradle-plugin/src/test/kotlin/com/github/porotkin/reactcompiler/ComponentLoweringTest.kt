@@ -97,6 +97,38 @@ class ComponentLoweringTest : PluginTest() {
     }
 
     @Test
+    fun `lowers child(type, props) and an early return in a tail branch`() {
+        val mjs = compile(
+            """
+            interface ItemProps : FragmentProps {
+                var active: Boolean
+                var opened: Boolean
+            }
+
+            val div: ElementType<ItemProps> = "div".unsafeCast<ElementType<ItemProps>>()
+            val span: ElementType<ItemProps> = "span".unsafeCast<ElementType<ItemProps>>()
+
+            val TailAndChildView: FC<ItemProps> = FC { props ->
+                child(span, props)
+
+                if (props.active) {
+                    span()
+                } else {
+                    if (!props.opened) return@FC
+
+                    div {
+                        +props.active.toString()
+                    }
+                }
+            }
+            """,
+        )
+
+        assertTrue("function TailAndChildView\$lambda(props)" in mjs, "Expected TailAndChildView lowered in:\n$mjs")
+        assertTrue("jsx(type, props, null)" in mjs, "Expected child(type, props) lowered to jsx in:\n$mjs")
+    }
+
+    @Test
     fun `binds a safe-call let parameter to a local and an implicit-cast element receiver to attrs`() {
         val mjs = compile(
             """

@@ -75,6 +75,16 @@ internal class Element(
     override val receiverUses get() = if (defaultKey != null) 2 else 1
 }
 
+/** `child(type, props)`, optionally keyed through `setDefaultKey`. */
+internal class ChildWithProps(
+    val type: IrExpression,
+    val props: IrExpression,
+    val defaultKey: IrExpression?,
+    val propsType: IrType,
+) : Child {
+    override val receiverUses get() = if (defaultKey != null) 2 else 1
+}
+
 /** A child built from nested items, which also reads the receiver [conditionUses] times as attrs in its conditions. */
 internal sealed class Nested(
     private val nested: List<Item>,

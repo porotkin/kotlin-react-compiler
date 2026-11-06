@@ -123,6 +123,7 @@ internal class ComponentEmitter(
                 val text = if (child.value.type.isChar()) b.irCall(symbols.charToString).apply { arguments[0] = child.value } else child.value
                 stable(text, "text", out)
             }
+            is ChildWithProps -> b.irGet(local("el", childWithProps(child), out))
             is Element -> b.irGet(local("el", element(child), out))
             is Choice -> b.irGet(local("el", choice(child), out))
             is LetBlock -> {
@@ -161,6 +162,14 @@ internal class ComponentEmitter(
         }
         items.forEach { emit(it, out, pushed) }
         return out
+    }
+
+    private fun childWithProps(child: ChildWithProps): IrExpression {
+        val out = mutableListOf<IrStatement>()
+        val type = stable(child.type, "type", out)
+        val props = stable(child.props, "props", out)
+        out += jsx(type, props, child.propsType, child.defaultKey)
+        return block(out)
     }
 
     private fun element(element: Element): IrExpression {

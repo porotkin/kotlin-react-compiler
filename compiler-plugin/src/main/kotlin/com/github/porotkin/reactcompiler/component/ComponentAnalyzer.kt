@@ -123,12 +123,13 @@ internal class ComponentAnalyzer(
             val s = statement.unwrapCoercion()
             if (s is IrComposite && s.isKeyedElement()) {
                 val (setKey, call) = s.statements.map { it.unwrapCoercion() as IrCall }
-                return element(call, setKey.arguments[1])
+                return if (call.isElementInvoke()) element(call, setKey.arguments[1]) else childWithProps(call, setKey.arguments[1])
             }
             if (s is IrCall && s.isElementInvoke()) return element(s, null)
             if (s is IrCall && s.isOnReceiver()) {
                 when {
                     s.isUnaryPlus() -> return Text(s.arguments[1]!!)
+                    s.isChildWithProps() -> return childWithProps(s, null)
                     isElementBody && s.isKeySetter() && s.arguments.last()!!.uses(receiver) == 0 -> return KeyProp(s.arguments.last()!!)
                 }
             }
@@ -167,6 +168,16 @@ internal class ComponentAnalyzer(
             val items = Scope(bodyReceiver.symbol, block.symbol, isRoot = false, isTail = true, allowAttrs = true, isElementBody = true)
                 .analyze(block.blockStatements() ?: return null) ?: return null
             return Element(call, defaultKey, bodyReceiver.symbol, bodyReceiver.type, items)
+        }
+
+        private fun childWithProps(
+            call: IrCall,
+            defaultKey: IrExpression?,
+        ): ChildWithProps? {
+            val type = call.arguments[1] ?: return null
+            val props = call.arguments[2] ?: return null
+            if (type.uses(receiver) != 0 || props.uses(receiver) != 0) return null
+            return ChildWithProps(type, props, defaultKey, call.typeArguments[0]!!)
         }
 
         /** An `if` / `when`; only one ending the body ([atTail]) may return, and then its branches end it too. */
@@ -249,6 +260,9 @@ internal class ComponentAnalyzer(
         private fun IrCall.isUnaryPlus(): Boolean =
             isChildrenBuilderMember("unaryPlus", arity = 2)
 
+        private fun IrCall.isChildWithProps(): Boolean =
+            isChildrenBuilderMember("child", arity = 3)
+
         private fun IrCall.isChildrenBuilderMember(
             name: String,
             arity: Int,
@@ -260,14 +274,14 @@ internal class ComponentAnalyzer(
         private fun IrCall.isOnReceiver(): Boolean =
             (arguments.getOrNull(0) as? IrGetValue)?.symbol == receiver
 
-        /** `setDefaultKey(key)` followed by the element it keys. */
+        /** `setDefaultKey(key)` followed by the element or `child(type, props)` it keys. */
         private fun IrContainerExpression.isKeyedElement(): Boolean {
             if (this !is IrComposite || statements.size != 2) return false
             val setKey = statements[0].unwrapCoercion() as? IrCall ?: return false
             val call = statements[1].unwrapCoercion() as? IrCall ?: return false
             return setKey.symbol.owner.fqNameWhenAvailable == SET_DEFAULT_KEY &&
                 setKey.isOnReceiver() &&
-                call.isElementInvoke()
+                (call.isElementInvoke() || call.isOnReceiver() && call.isChildWithProps())
         }
 
         /** Reads of the receiver passed where props are expected: attrs accesses, when this scope [allowAttrs]. */
