@@ -92,7 +92,9 @@ internal class ComponentEmitter(
     ) {
         when (item) {
             is Plain -> out += item.statement.transform(returnsNull, null) as IrStatement
+            is Rebind -> out += item.variable.apply { initializer = item.initializer }
             is KeyProp -> children.key = stable(item.value, "key", out)
+            is Guard -> out += guard(item)
             is Child -> children.add(child(item, out))
         }
     }
@@ -103,6 +105,13 @@ internal class ComponentEmitter(
             expression.transformChildrenVoid(this)
             return if (expression.returnTargetSymbol == fn.symbol) b.irReturn(b.irNull(symbols.reactNode)) else expression
         }
+    }
+
+    /** `if (condition) { ...; return node }` */
+    private fun guard(guard: Guard): IrExpression {
+        val then = mutableListOf<IrStatement>()
+        then += b.irReturn(node(guard.items, then))
+        return b.irWhen(unitType, listOf(b.irBranch(guard.condition, b.irBlock(resultType = unitType) { then.forEach { +it } })))
     }
 
     private fun child(

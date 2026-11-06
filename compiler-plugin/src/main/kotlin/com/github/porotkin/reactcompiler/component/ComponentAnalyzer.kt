@@ -7,6 +7,7 @@ import com.github.porotkin.reactcompiler.unwrapCoercion
 import org.jetbrains.kotlin.ir.IrElement
 import org.jetbrains.kotlin.ir.IrStatement
 import org.jetbrains.kotlin.ir.declarations.IrFunction
+import org.jetbrains.kotlin.ir.declarations.IrVariable
 import org.jetbrains.kotlin.ir.expressions.IrBlockBody
 import org.jetbrains.kotlin.ir.expressions.IrCall
 import org.jetbrains.kotlin.ir.expressions.IrComposite
@@ -57,40 +58,68 @@ internal class ComponentAnalyzer(
         builder: IrValueSymbol,
     ): List<Item>? {
         val statements = (function.body as? IrBlockBody)?.statements ?: return null
-        val scope = Scope(builder, function.symbol, isRoot = true, allowAttrs = false, isElementBody = false)
+        val scope = Scope(builder, function.symbol, isRoot = true, isTail = true, allowAttrs = false, isElementBody = false)
         return scope.analyze(statements)
     }
 
     /**
      * The statements written against one builder [receiver] in a function [owner]: the component body ([isRoot]),
-     * an element body, or a branch, loop body or inline lambda nested in one. Where [allowAttrs], reads of the
-     * receiver as props access the attrs object of the element; in an [isElementBody], `key = ...` becomes the
-     * element's `jsx` key.
+     * an element body, or a branch, loop body or inline lambda nested in one. The last statement of an [isTail]
+     * scope ends the body, so it may return. Where [allowAttrs], reads of the receiver as props access the attrs
+     * object of the element; in an [isElementBody], `key = ...` becomes the element's `jsx` key.
      */
     private inner class Scope(
         private val receiver: IrValueSymbol,
         private val owner: IrFunctionSymbol,
         private val isRoot: Boolean,
+        private val isTail: Boolean,
         private val allowAttrs: Boolean,
         private val isElementBody: Boolean,
     ) {
         fun analyze(statements: List<IrStatement>): List<Item>? {
             val trimmed = statements.trimTrailingReturn().flattenBlocks()
+            val pending = ArrayDeque(trimmed)
             val items = mutableListOf<Item>()
-            for (statement in trimmed) {
+            while (pending.isNotEmpty()) {
+                val statement = pending.removeFirst()
+                val atTail = isTail && pending.isEmpty()
                 if (statement.returnsTo(owner)) {
-                    // e.g. `if (!visible) return@FC` before anything is built: returns `null`.
-                    if (!isRoot || items.any { it is Child } || statement.uses(receiver) != 0) return null
-                    items += plain(statement)
-                    continue
+                    if (isRoot && items.none { it is Child } && statement.uses(receiver) == 0) {
+                        // e.g. `if (!visible) return@FC` before anything is built: returns `null`.
+                        items += plain(statement)
+                        continue
+                    }
+                    val early = earlyReturn(statement)
+                    if (early == null) {
+                        // Only the statement ending the body may return in a shape not split here.
+                        if (!atTail) return null
+                    } else {
+                        items += early.preamble.map(::plain)
+                        val then = subScope(isTail = false).analyze(early.then) ?: return null
+                        val rebind = early.rebind?.let { (variable, value) -> Rebind(variable, value, attrsUses(value)) }
+                        if (isRoot && items.none { it is Child }) {
+                            // Statements past a root early return stay at the top level, where React Compiler needs hooks.
+                            items += Guard(early.condition, then)
+                            items += listOfNotNull(rebind)
+                            pending.addAll(0, early.orElse.flattenBlocks())
+                            continue
+                        }
+                        val orElse = subScope(isTail).analyze(early.orElse + pending) ?: return null
+                        val branches = listOf(Branch(early.condition, then), Branch(null, listOfNotNull(rebind) + orElse))
+                        items += Choice(branches, attrsUses(early.condition))
+                        break
+                    }
                 }
-                items += classify(statement) ?: return null
+                items += classify(statement, atTail) ?: return null
             }
             // A receiver read no item accounts for (e.g. the builder escaping into a function) makes the body unsafe to rewrite.
             return items.takeIf { trimmed.sumOf { it.uses(receiver) } == items.sumOf(Item::receiverUses) }
         }
 
-        private fun classify(statement: IrStatement): Item? {
+        private fun classify(
+            statement: IrStatement,
+            atTail: Boolean,
+        ): Item? {
             val s = statement.unwrapCoercion()
             if (s is IrComposite && s.isKeyedElement()) {
                 val (setKey, call) = s.statements.map { it.unwrapCoercion() as IrCall }
@@ -104,7 +133,7 @@ internal class ComponentAnalyzer(
                 }
             }
             val structure = when {
-                s is IrWhen -> choice(s)
+                s is IrWhen -> choice(s, atTail)
                 s is IrWhileLoop -> whileLoop(s)
                 s is IrCall && s.isInlineBlockCall(KOTLIN_REPEAT) -> repeatLoop(s)
                 s is IrCall && s.isInlineBlockCall(KOTLIN_LET) -> letBlock(s)
@@ -118,8 +147,11 @@ internal class ComponentAnalyzer(
         private fun plain(statement: IrStatement): Plain =
             Plain(statement, attrsUses(statement))
 
-        private fun subScope(owner: IrFunctionSymbol = this.owner): Scope =
-            Scope(receiver, owner, isRoot = false, allowAttrs, isElementBody = false)
+        private fun subScope(
+            isTail: Boolean,
+            owner: IrFunctionSymbol = this.owner,
+        ): Scope =
+            Scope(receiver, owner, isRoot = false, isTail, allowAttrs, isElementBody = false)
 
         private fun element(
             call: IrCall,
@@ -132,16 +164,20 @@ internal class ComponentAnalyzer(
             }
             val block = (call.arguments.last() as? IrFunctionExpression)?.function ?: return null
             val bodyReceiver = block.parameters.singleOrNull() ?: return null
-            val items = Scope(bodyReceiver.symbol, block.symbol, isRoot = false, allowAttrs = true, isElementBody = true)
+            val items = Scope(bodyReceiver.symbol, block.symbol, isRoot = false, isTail = true, allowAttrs = true, isElementBody = true)
                 .analyze(block.blockStatements() ?: return null) ?: return null
             return Element(call, defaultKey, bodyReceiver.symbol, bodyReceiver.type, items)
         }
 
-        /** An `if` / `when`, which must not return. */
-        private fun choice(expression: IrWhen): Choice? {
-            if (expression.returnsTo(owner)) return null
+        /** An `if` / `when`; only one ending the body ([atTail]) may return, and then its branches end it too. */
+        private fun choice(
+            expression: IrWhen,
+            atTail: Boolean,
+        ): Choice? {
+            if (expression.branches.any { it.condition.returnsTo(owner) }) return null
+            if (!atTail && expression.returnsTo(owner)) return null
             val branches = expression.branches.map { branch ->
-                val items = subScope().analyze(branch.result.branchStatements()) ?: return null
+                val items = subScope(atTail).analyze(branch.result.branchStatements()) ?: return null
                 Branch(branch.condition.takeUnless { branch is IrElseBranch }, items)
             }
             return Choice(branches, expression.branches.sumOf { attrsUses(it.condition) })
@@ -149,7 +185,7 @@ internal class ComponentAnalyzer(
 
         private fun whileLoop(loop: IrWhileLoop): WhileLoop? {
             if (loop.returnsTo(owner)) return null
-            val items = subScope().analyze(loop.body?.branchStatements() ?: return null) ?: return null
+            val items = subScope(isTail = false).analyze(loop.body?.branchStatements() ?: return null) ?: return null
             return WhileLoop(loop, items, attrsUses(loop.condition))
         }
 
@@ -157,7 +193,7 @@ internal class ComponentAnalyzer(
             val times = call.arguments[0] ?: return null
             val action = (call.arguments[1] as IrFunctionExpression).function
             if (action.returnsTo(owner) || times.returnsTo(owner) || times.uses(receiver) != 0) return null
-            val items = subScope(action.symbol).analyze(action.blockStatements() ?: return null) ?: return null
+            val items = subScope(isTail = true, action.symbol).analyze(action.blockStatements() ?: return null) ?: return null
             return RepeatLoop(call, action, items)
         }
 
@@ -166,8 +202,40 @@ internal class ComponentAnalyzer(
             val action = (call.arguments[1] as IrFunctionExpression).function
             val parameter = action.parameters.singleOrNull() ?: return null
             if (action.returnsTo(owner) || value.returnsTo(owner) || value.uses(receiver) != 0) return null
-            val items = subScope(action.symbol).analyze(action.blockStatements() ?: return null) ?: return null
+            val items = subScope(isTail = true, action.symbol).analyze(action.blockStatements() ?: return null) ?: return null
             return LetBlock(value, parameter, items)
+        }
+
+        /** `if (cond) { ...; return } [else { ... }]`, or `val v = x ?: run { ...; return }`: locals ending in such an `if`. */
+        private fun earlyReturn(statement: IrStatement): EarlyReturn? =
+            when (val s = statement.unwrapCoercion()) {
+                is IrWhen -> {
+                    val (then, orElse) = s.returnBranch() ?: return null
+                    // The `else` value is dropped in statement position, e.g. the `tmp` of a flattened `x ?: return`.
+                    EarlyReturn(emptyList(), s.branches[0].condition, then, orElse?.branchStatements().orEmpty().filterNot { it is IrGetValue }, null)
+                }
+                is IrVariable -> {
+                    val block = s.initializer as? IrContainerExpression ?: return null
+                    val ifReturn = block.statements.lastOrNull() as? IrWhen ?: return null
+                    val preamble = block.statements.dropLast(1)
+                    if (preamble.any { it !is IrVariable || it.returnsTo(owner) }) return null
+                    val (then, orElse) = ifReturn.returnBranch() ?: return null
+                    EarlyReturn(preamble, ifReturn.branches[0].condition, then, emptyList(), s to (orElse ?: return null))
+                }
+                else -> null
+            }
+
+        /** The statements before the `return` of `if (cond) { ...; return } [else value]`, and the `else` value. */
+        private fun IrWhen.returnBranch(): Pair<List<IrStatement>, IrExpression?>? {
+            val first = branches.firstOrNull()?.takeUnless { it is IrElseBranch } ?: return null
+            if (branches.size > 2) return null
+            val orElse = branches.getOrNull(1)?.let { it as? IrElseBranch ?: return null }?.result
+            val statements = first.result.branchStatements()
+            val last = statements.lastOrNull() as? IrReturn ?: return null
+            if (last.returnTargetSymbol != owner || !last.isUnitReturn()) return null
+            val then = statements.dropLast(1)
+            if (then.any { it.returnsTo(owner) } || first.condition.returnsTo(owner) || orElse?.returnsTo(owner) == true) return null
+            return then to orElse
         }
 
         /** `type { }` / `type()`: an element `invoke` on this scope's builder. */
@@ -262,6 +330,18 @@ internal class ComponentAnalyzer(
         }
     }
 }
+
+private class EarlyReturn(
+    /** Locals evaluated before [condition]. */
+    val preamble: List<IrStatement>,
+    val condition: IrExpression,
+    /** The statements before the `return`. */
+    val then: List<IrStatement>,
+    /** The statements run when [condition] is false. */
+    val orElse: List<IrStatement>,
+    /** For `val v = x ?: run { ...; return }`, `v` and its value when [condition] is false. */
+    val rebind: Pair<IrVariable, IrExpression>?,
+)
 
 private fun IrFunction.blockStatements(): List<IrStatement>? =
     (body as? IrBlockBody)?.statements

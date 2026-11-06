@@ -3,6 +3,7 @@ package com.github.porotkin.reactcompiler.component
 import org.jetbrains.kotlin.ir.IrStatement
 import org.jetbrains.kotlin.ir.declarations.IrSimpleFunction
 import org.jetbrains.kotlin.ir.declarations.IrValueParameter
+import org.jetbrains.kotlin.ir.declarations.IrVariable
 import org.jetbrains.kotlin.ir.expressions.IrCall
 import org.jetbrains.kotlin.ir.expressions.IrExpression
 import org.jetbrains.kotlin.ir.expressions.IrWhileLoop
@@ -27,11 +28,26 @@ internal class Plain(
     override val attrsUses: Int,
 ) : Item
 
+/** The variable of `val v = x ?: run { ...; return }` past its early return, initialized with the value of the `else`. */
+internal class Rebind(
+    val variable: IrVariable,
+    val initializer: IrExpression,
+    override val attrsUses: Int,
+) : Item
+
 /** An explicit `key = ...` in an element body, passed as the 3rd argument to `jsx`. */
 internal class KeyProp(
     val value: IrExpression,
 ) : Item {
     override val receiverUses get() = 1
+}
+
+/** An early return at the root of a component, before any child (`if (cond) { Skeleton(); return@FC }`). */
+internal class Guard(
+    val condition: IrExpression,
+    val items: List<Item>,
+) : Item {
+    override val receiverUses get() = items.sumOf { it.receiverUses }
 }
 
 /** An item that adds child nodes. */

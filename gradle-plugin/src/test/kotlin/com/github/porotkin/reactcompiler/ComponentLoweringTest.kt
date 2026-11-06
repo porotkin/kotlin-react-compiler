@@ -319,4 +319,49 @@ class ComponentLoweringTest : PluginTest() {
         assertTrue("helper(\$this\$div);" in mjs, "Expected helper() called with builder receiver in:\n$mjs")
         assertTrue("genericEscape(\$this\$div);" in mjs, "Expected genericEscape() called with builder receiver in:\n$mjs")
     }
+
+    @Test
+    fun `executes lowered components in Node and produces expected React element trees`() {
+        compile(
+            """
+            val div: ElementType<FragmentProps> = "div".unsafeCast<ElementType<FragmentProps>>()
+            val span: ElementType<FragmentProps> = "span".unsafeCast<ElementType<FragmentProps>>()
+
+            val GuardedAndLooped: FC<Props> = FC { props ->
+                val mode = props.asDynamic().mode as String
+                if (mode == "guard") {
+                    span { +"Guarded" }
+                    return@FC
+                }
+                div {
+                    if (mode == "early") {
+                        span { +"Early" }
+                        return@div
+                    }
+                    var i = 0
+                    while (i < 2) {
+                        span {
+                            key = "item-${'$'}i"
+                            +i.toString()
+                        }
+                        i++
+                    }
+                }
+            }
+
+            @JsExport
+            fun renderMode(mode: String): Any? =
+                GuardedAndLooped.asDynamic()(js("({ mode: mode })"))
+            """,
+        )
+
+        val output = runNode(
+            "app",
+            "console.log(JSON.stringify({ guardTree: m.renderMode('guard'), earlyTree: m.renderMode('early'), loopTree: m.renderMode('loop') }));",
+        )
+        assertTrue(""""guardTree":{"type":"span","props":{"children":"Guarded"}""" in output, "Unexpected guardTree in:\n$output")
+        assertTrue(""""earlyTree":{"type":"div","props":{"children":{"type":"span","props":{"children":"Early"}""" in output, "Unexpected earlyTree in:\n$output")
+        assertTrue(""""loopTree":{"type":"div","props":{"children":[{"type":"span","props":{"children":"0"},"key":"item-0"},{"type":"span","props":{"children":"1"},"key":"item-1"}]}""" in output, "Unexpected loopTree in:\n$output")
+    }
+
 }
