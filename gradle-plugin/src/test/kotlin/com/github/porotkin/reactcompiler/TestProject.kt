@@ -74,6 +74,9 @@ internal class TestProject(
             subprojects {
                 apply(plugin = "org.jetbrains.kotlin.multiplatform")
                 extensions.configure<org.jetbrains.kotlin.gradle.dsl.KotlinMultiplatformExtension> {
+                    compilerOptions {
+                        freeCompilerArgs.addAll("-Xverify-ir=error")
+                    }
                     js {
                         browser()
                         binaries.executable()
