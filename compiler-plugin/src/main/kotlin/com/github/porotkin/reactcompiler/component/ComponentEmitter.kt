@@ -85,6 +85,7 @@ internal class ComponentEmitter(
     ) {
         when (item) {
             is Plain -> out += item.statement.transform(returnsNull, null) as IrStatement
+            is KeyProp -> children.key = stable(item.value, "key", out)
             is Child -> children.add(child(item, out))
         }
     }
@@ -122,7 +123,7 @@ internal class ComponentEmitter(
             emit(item, out, children)
         }
         setChildren(attrs.value, children.nodes, out)
-        out += jsx(type, b.irGet(attrs.value), element.propsType, element.defaultKey ?: sourceKey(element.call))
+        out += jsx(type, b.irGet(attrs.value), element.propsType, children.key ?: element.defaultKey ?: sourceKey(element.call))
         return block(out)
     }
 
@@ -201,9 +202,10 @@ internal class ComponentEmitter(
     }
 }
 
-/** What a list of items adds: its child nodes, in order. */
+/** What a list of items adds: its child nodes, in order, and in an element body the explicit `key`. */
 private class Children {
     val nodes = mutableListOf<IrExpression>()
+    var key: IrExpression? = null
 
     fun add(node: IrExpression) {
         nodes += node

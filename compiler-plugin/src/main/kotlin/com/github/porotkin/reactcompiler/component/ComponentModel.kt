@@ -24,6 +24,13 @@ internal class Plain(
     override val attrsUses: Int,
 ) : Item
 
+/** An explicit `key = ...` in an element body, passed as the 3rd argument to `jsx`. */
+internal class KeyProp(
+    val value: IrExpression,
+) : Item {
+    override val receiverUses get() = 1
+}
+
 /** An item that adds child nodes. */
 internal sealed interface Child : Item {
     /** Whether a node is added at all; a structure that adds none stays a [Plain] statement. */

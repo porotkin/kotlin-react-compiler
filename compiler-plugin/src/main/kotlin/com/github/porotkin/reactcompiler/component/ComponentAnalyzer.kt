@@ -55,20 +55,21 @@ internal class ComponentAnalyzer(
         builder: IrValueSymbol,
     ): List<Item>? {
         val statements = (function.body as? IrBlockBody)?.statements ?: return null
-        val scope = Scope(builder, function.symbol, isRoot = true, allowAttrs = false)
+        val scope = Scope(builder, function.symbol, isRoot = true, allowAttrs = false, isElementBody = false)
         return scope.analyze(statements)
     }
 
     /**
      * The statements written against one builder [receiver] in a function [owner]: the component body ([isRoot]),
      * an element body, or a branch nested in one. Where [allowAttrs], reads of the receiver as props access the
-     * attrs object of the element.
+     * attrs object of the element; in an [isElementBody], `key = ...` becomes the element's `jsx` key.
      */
     private inner class Scope(
         private val receiver: IrValueSymbol,
         private val owner: IrFunctionSymbol,
         private val isRoot: Boolean,
         private val allowAttrs: Boolean,
+        private val isElementBody: Boolean,
     ) {
         fun analyze(statements: List<IrStatement>): List<Item>? {
             val trimmed = statements.trimTrailingReturn().flattenBlocks()
@@ -93,8 +94,11 @@ internal class ComponentAnalyzer(
                 return element(call, setKey.arguments[1])
             }
             if (s is IrCall && s.isElementInvoke()) return element(s, null)
-            if (s is IrCall && s.isOnReceiver() && s.isUnaryPlus()) {
-                return Text(s.arguments[1]!!).takeUnless { s.symbol.owner.parameters[1].type.isChar() }
+            if (s is IrCall && s.isOnReceiver()) {
+                when {
+                    s.isUnaryPlus() -> return Text(s.arguments[1]!!).takeUnless { s.symbol.owner.parameters[1].type.isChar() }
+                    isElementBody && s.isKeySetter() && s.arguments.last()!!.uses(receiver) == 0 -> return KeyProp(s.arguments.last()!!)
+                }
             }
             val structure = when {
                 s is IrWhen -> choice(s)
@@ -109,7 +113,7 @@ internal class ComponentAnalyzer(
             Plain(statement, attrsUses(statement))
 
         private fun subScope(): Scope =
-            Scope(receiver, owner, isRoot = false, allowAttrs)
+            Scope(receiver, owner, isRoot = false, allowAttrs, isElementBody = false)
 
         private fun element(
             call: IrCall,
@@ -122,7 +126,7 @@ internal class ComponentAnalyzer(
             }
             val block = (call.arguments.last() as? IrFunctionExpression)?.function ?: return null
             val bodyReceiver = block.parameters.singleOrNull() ?: return null
-            val items = Scope(bodyReceiver.symbol, block.symbol, isRoot = false, allowAttrs = true)
+            val items = Scope(bodyReceiver.symbol, block.symbol, isRoot = false, allowAttrs = true, isElementBody = true)
                 .analyze(block.blockStatements() ?: return null) ?: return null
             return Element(call, defaultKey, bodyReceiver.symbol, bodyReceiver.type, items)
         }
@@ -232,6 +236,11 @@ internal class ComponentAnalyzer(
 
 private fun IrFunction.blockStatements(): List<IrStatement>? =
     (body as? IrBlockBody)?.statements
+
+private fun IrCall.isKeySetter(): Boolean {
+    val property = symbol.owner.correspondingPropertySymbol?.owner ?: return false
+    return property.setter == symbol.owner && property.name.asString() == "key"
+}
 
 private fun IrReturn.isUnitReturn(): Boolean =
     value.let { it is IrGetObjectValue && it.type.isUnit() }

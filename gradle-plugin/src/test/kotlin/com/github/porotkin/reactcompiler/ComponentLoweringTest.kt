@@ -145,6 +145,34 @@ class ComponentLoweringTest : PluginTest() {
     }
 
     @Test
+    fun `keeps conditional key assignment inside a child-adding branch on attrs instead of hoisting`() {
+        val mjs = compile(
+            """
+            interface ItemProps : FragmentProps {
+                var active: Boolean
+            }
+
+            val div: ElementType<ItemProps> = "div".unsafeCast<ElementType<ItemProps>>()
+            val span: ElementType<ItemProps> = "span".unsafeCast<ElementType<ItemProps>>()
+
+            val ConditionalKeyView: FC<ItemProps> = FC { props ->
+                div {
+                    if (props.active) {
+                        key = "active-key"
+                        span { +"Active" }
+                    }
+                }
+            }
+            """,
+        )
+
+        assertTrue("function ConditionalKeyView\$lambda(props)" in mjs, "Expected ConditionalKeyView lowered in:\n$mjs")
+        assertTrue(Regex("""attrs\.set_key_[\w$]+\('active-key'\);""") in mjs, "Expected conditional key set on attrs inside branch in:\n$mjs")
+        assertFalse("var key = 'active-key';" in mjs, "Expected conditional key not hoisted to a var key local in:\n$mjs")
+        assertTrue(Regex("""jsx\(type, attrs, '@rdk/\d+_\d+'\)""") in mjs, "Expected source key passed as 3rd argument to jsx in:\n$mjs")
+    }
+
+    @Test
     fun `does not lower a plain Function4 invocation on ChildrenBuilder as a jsx element`() {
         val mjs = compile(
             """
