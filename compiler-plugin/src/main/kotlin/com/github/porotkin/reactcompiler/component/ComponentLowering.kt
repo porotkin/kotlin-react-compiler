@@ -8,6 +8,7 @@ import org.jetbrains.kotlin.ir.IrStatement
 import org.jetbrains.kotlin.ir.builders.irAnnotation
 import org.jetbrains.kotlin.ir.builders.irImplicitCast
 import org.jetbrains.kotlin.ir.declarations.IrFile
+import org.jetbrains.kotlin.ir.declarations.IrFunction
 import org.jetbrains.kotlin.ir.declarations.IrParameterKind
 import org.jetbrains.kotlin.ir.declarations.IrProperty
 import org.jetbrains.kotlin.ir.declarations.IrSimpleFunction
@@ -22,13 +23,14 @@ import org.jetbrains.kotlin.ir.visitors.transformChildrenVoid
 /**
  * Lowers `FC { props -> ... }` from `ChildrenBuilder.(props) -> Unit` into a `(props) -> ReactNode?` function
  * React Compiler can analyze ([ComponentAnalyzer] reads the body, [ComponentEmitter] rewrites it), and marks
- * properties initialized with such a component `@EagerInitialization`. The [ComponentHelpers] these bodies call
- * are lowered the same way.
+ * properties initialized with such a component `@EagerInitialization`. The render lambdas passed to
+ * [ComponentWrappers] are lowered the same way, and so are the [ComponentHelpers] these bodies call.
  */
 internal class ComponentLowering(
     context: IrPluginContext,
     symbols: ReactSymbols,
 ) : ReactLowering(context, symbols) {
+    private val wrappers = ComponentWrappers(context, symbols)
     private val components = mutableSetOf<IrExpression>()
     private lateinit var fileEntry: IrFileEntry
     private lateinit var helpers: ComponentHelpers
@@ -38,6 +40,13 @@ internal class ComponentLowering(
         helpers = ComponentHelpers(irFile, symbols, ::rewrite)
         super.lower(irFile)
         helpers.install()
+    }
+
+    override fun visitFunctionNew(declaration: IrFunction): IrStatement {
+        if (declaration is IrSimpleFunction) {
+            wrappers.checkDeclaration(declaration, currentFile)
+        }
+        return super.visitFunctionNew(declaration)
     }
 
     /** Only a bare component is safe to initialize eagerly; wrappers like `memo(FC { })` run code and stay lazy. */
@@ -51,13 +60,15 @@ internal class ComponentLowering(
 
     override fun visitCall(expression: IrCall): IrExpression {
         expression.transformChildrenVoid(this)
-        if (expression.symbol !in symbols.componentFactories) return expression
-        return lowerFactoryCall(expression)
+        if (expression.symbol in symbols.componentFactories) return lowerFactoryCall(expression)
+        wrappers.lowerCall(expression, ::lowerLambda)
+        return expression
     }
 
-    /** `FC { }` with a lowerable lambda. */
+    /** `FC { }` with a lowerable lambda, or `FC(render)` in a wrapper, whose render parameter now holds the component. */
     private fun lowerFactoryCall(call: IrCall): IrExpression {
         val argument = call.arguments[0]
+        if (wrappers.isRender(argument)) return builder(call.symbol).irImplicitCast(argument!!, call.type)
         if (argument !is IrFunctionExpression || !lowerLambda(argument)) return call
         return builder(call.symbol).irImplicitCast(argument, call.type).also(components::add)
     }

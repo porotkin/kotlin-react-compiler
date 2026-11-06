@@ -48,9 +48,19 @@ internal class TestProject(
             .build()
     }
 
+    fun runAndFail(vararg tasks: String): BuildResult {
+        writeRootBuild()
+
+        return GradleRunner.create()
+            .withProjectDir(dir)
+            .withArguments(*tasks, "--stacktrace")
+            .buildAndFail()
+    }
+
     private fun writeRootBuild() {
         write("$STUBS_MODULE/build.gradle.kts", "")
         write("$STUBS_MODULE/src/jsMain/kotlin/ReactStubs.kt", REACT_STUBS)
+        write("$STUBS_MODULE/src/jsMain/kotlin/ReactAnnotations.kt", REACT_ANNOTATIONS)
         write("$STUBS_MODULE/src/jsMain/kotlin/ReactRawStubs.kt", REACT_RAW_STUBS)
         write("$STUBS_MODULE/src/jsMain/kotlin/ReactJsxStubs.kt", REACT_JSX_STUBS)
         write(
@@ -97,6 +107,13 @@ internal class TestProject(
 }
 
 private const val STUBS_MODULE = "react-stubs"
+
+private val REACT_ANNOTATIONS =
+    """
+    package com.github.porotkin.reactcompiler
+
+    annotation class ComponentWrapper
+    """.trimIndent() + "\n"
 
 private val REACT_STUBS =
     """

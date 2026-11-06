@@ -32,6 +32,7 @@ internal class ReactSymbols private constructor(
     val propsWithChildrenClass = classSymbol(classId(REACT, "PropsWithChildren"))
     val childrenBuilderClass = classSymbol(classId(REACT, "ChildrenBuilder"))
     val elementTypeClass = classSymbol(classId(REACT, "ElementType"))
+    val fcClass = classSymbol(classId(REACT, "FC"))
     val charToString: IrSimpleFunctionSymbol = finder
         .findFunctions(CallableId(classId(FqName("kotlin"), "Char"), Name.identifier("toString")))
         .single { it.owner.parameters.size == 1 }

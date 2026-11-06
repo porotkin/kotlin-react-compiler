@@ -24,3 +24,21 @@ plugins {
 - **Component lowering (`FC`):** Rewrites `FC { ... }` component lambdas from `($this$FC, props) -> Unit` into `(props) -> ReactNode?` functions that emit `"use memo"` at the start of the body, keep hook calls at the top level, lower `ChildrenBuilder` element DSL calls into direct `jsx(type, attrs, "@rdk/<line>_<col>")` calls, and annotate top-level properties initialized with a bare component with `@EagerInitialization`.
 - **Hook argument reordering (`useMemo` / `useCallback`):** Rewrites `kotlin-react`'s `(vararg dependencies, callback)` hook calls to `useMemoRaw(callback, dependencies)` / `useCallbackRaw(callback, dependencies)` in IR before Kotlin/JS lowers arguments into reversed evaluation-order temporaries or applies Seskar `@JsRaw` value-class dependency array wrappers.
 - **Custom hook directive injection (`use*`):** Prepends `js("\"use memo\"")` to top-level `use*` functions so React Compiler compiles them in `annotation` mode and preserves top-level hook calls inside hoisted `$lambda` helpers.
+
+## Component wrappers
+
+A function returning `FC` that takes a `ChildrenBuilder.(props) -> Unit` render lambda and only passes it to
+`FC(render)` (or to another wrapper) can opt in to lowering its call sites. Declare the marker annotation in your
+project (it is matched by its fully qualified name) and annotate the wrapper:
+
+```kotlin
+package com.github.porotkin.reactcompiler
+
+@Target(AnnotationTarget.FUNCTION)
+annotation class ComponentWrapper
+```
+
+The plugin rewrites the wrapper body so it takes an already-built component. Every call site then passes either a
+lowered lambda or, when the lambda cannot be lowered, `FC(lambda)`, so runtime behavior is preserved. The contract is
+checked in the declaring module (a wrapper that uses its lambda in any other way fails the build), and call sites in
+every module must be compiled with the plugin. Wrappers without the annotation are never rewritten.
