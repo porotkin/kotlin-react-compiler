@@ -2,16 +2,23 @@ package com.github.porotkin.reactcompiler
 
 import org.jetbrains.kotlin.ir.IrElement
 import org.jetbrains.kotlin.ir.IrStatement
+import org.jetbrains.kotlin.ir.UNDEFINED_OFFSET
 import org.jetbrains.kotlin.ir.builders.IrBuilderWithScope
+import org.jetbrains.kotlin.ir.builders.declarations.buildVariable
 import org.jetbrains.kotlin.ir.builders.irCall
 import org.jetbrains.kotlin.ir.builders.irString
+import org.jetbrains.kotlin.ir.declarations.IrDeclarationOrigin
+import org.jetbrains.kotlin.ir.declarations.IrDeclarationParent
+import org.jetbrains.kotlin.ir.declarations.IrVariable
 import org.jetbrains.kotlin.ir.expressions.IrCall
 import org.jetbrains.kotlin.ir.expressions.IrConst
+import org.jetbrains.kotlin.ir.expressions.IrExpression
 import org.jetbrains.kotlin.ir.expressions.IrTypeOperator
 import org.jetbrains.kotlin.ir.expressions.IrTypeOperatorCall
 import org.jetbrains.kotlin.ir.visitors.IrVisitorVoid
 import org.jetbrains.kotlin.ir.visitors.acceptChildrenVoid
 import org.jetbrains.kotlin.ir.visitors.acceptVoid
+import org.jetbrains.kotlin.name.Name
 
 /** React Compiler's opt-in directive: in `annotation` mode it only compiles functions that start with it. */
 private const val USE_MEMO = "\"use memo\""
@@ -22,6 +29,15 @@ internal fun IrBuilderWithScope.irJs(
     code: String,
 ): IrCall =
     irCall(symbols.js).apply { arguments[0] = irString(code) }
+
+/** `val <name> = <value>`, a local of [parent]. */
+internal fun irVal(
+    parent: IrDeclarationParent,
+    name: String,
+    value: IrExpression,
+): IrVariable =
+    buildVariable(parent, UNDEFINED_OFFSET, UNDEFINED_OFFSET, IrDeclarationOrigin.DEFINED, Name.identifier(name), value.type)
+        .apply { initializer = value }
 
 internal fun IrBuilderWithScope.irUseMemo(symbols: ReactSymbols): IrCall =
     irJs(symbols, USE_MEMO)

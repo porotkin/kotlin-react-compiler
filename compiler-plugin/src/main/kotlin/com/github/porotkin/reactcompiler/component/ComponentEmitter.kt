@@ -3,12 +3,11 @@ package com.github.porotkin.reactcompiler.component
 import com.github.porotkin.reactcompiler.ReactSymbols
 import com.github.porotkin.reactcompiler.irJs
 import com.github.porotkin.reactcompiler.irUseMemo
+import com.github.porotkin.reactcompiler.irVal
 import com.github.porotkin.reactcompiler.isUseMemo
 import org.jetbrains.kotlin.ir.IrFileEntry
 import org.jetbrains.kotlin.ir.IrStatement
-import org.jetbrains.kotlin.ir.UNDEFINED_OFFSET
 import org.jetbrains.kotlin.ir.builders.IrBuilderWithScope
-import org.jetbrains.kotlin.ir.builders.declarations.buildVariable
 import org.jetbrains.kotlin.ir.builders.irBlock
 import org.jetbrains.kotlin.ir.builders.irBranch
 import org.jetbrains.kotlin.ir.builders.irCall
@@ -20,7 +19,6 @@ import org.jetbrains.kotlin.ir.builders.irReturn
 import org.jetbrains.kotlin.ir.builders.irString
 import org.jetbrains.kotlin.ir.builders.irVararg
 import org.jetbrains.kotlin.ir.builders.irWhen
-import org.jetbrains.kotlin.ir.declarations.IrDeclarationOrigin
 import org.jetbrains.kotlin.ir.declarations.IrSimpleFunction
 import org.jetbrains.kotlin.ir.declarations.IrVariable
 import org.jetbrains.kotlin.ir.expressions.IrCall
@@ -33,7 +31,6 @@ import org.jetbrains.kotlin.ir.expressions.IrGetValue
 import org.jetbrains.kotlin.ir.expressions.IrReturn
 import org.jetbrains.kotlin.ir.visitors.IrElementTransformerVoid
 import org.jetbrains.kotlin.ir.visitors.transformChildrenVoid
-import org.jetbrains.kotlin.name.Name
 
 /**
  * Writes an analyzed component body back as IR for [fn]: `"use memo"`, the [Plain] statements in order,
@@ -168,9 +165,7 @@ internal class ComponentEmitter(
         value: IrExpression,
         out: MutableList<IrStatement>,
     ): IrVariable =
-        buildVariable(fn, UNDEFINED_OFFSET, UNDEFINED_OFFSET, IrDeclarationOrigin.DEFINED, Name.identifier(name), value.type)
-            .apply { initializer = value }
-            .also(out::add)
+        irVal(fn, name, value).also(out::add)
 
     private fun block(statements: List<IrStatement>): IrExpression =
         b.irBlock(resultType = symbols.reactNode) { statements.forEach { +it } }
