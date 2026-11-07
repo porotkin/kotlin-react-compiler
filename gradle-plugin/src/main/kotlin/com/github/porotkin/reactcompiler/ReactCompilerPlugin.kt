@@ -28,6 +28,8 @@ class ReactCompilerPlugin : KotlinCompilerPluginSupportPlugin {
         if (kotlinCompilation.name == KotlinCompilation.MAIN_COMPILATION_NAME) {
             kotlinCompilation.defaultSourceSet.dependencies { api(ANNOTATIONS_DEPENDENCY) }
         }
+        // Only modules compiled with the plugin may call @ComponentWrapper functions, whose bodies it rewrites
+        kotlinCompilation.compileTaskProvider.configure { compilerOptions.optIn.add(COMPONENT_WRAPPER) }
 
         return kotlinCompilation.target.project.provider { emptyList() }
     }

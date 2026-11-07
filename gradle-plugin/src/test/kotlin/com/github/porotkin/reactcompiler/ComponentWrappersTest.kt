@@ -175,6 +175,46 @@ class ComponentWrappersTest : PluginTest() {
     }
 
     @Test
+    fun `fails the build when a module compiled without the plugin calls a component wrapper`() {
+        val project = TestProject(dir).apply {
+            module(
+                "lib",
+                """
+                package lib
+
+                import com.github.porotkin.reactcompiler.ComponentWrapper
+                import react.*
+
+                @ComponentWrapper
+                fun <P : Props> Wrap(
+                    render: ChildrenBuilder.(props: P) -> Unit,
+                ): FC<P> =
+                    memo(FC(render))
+                """,
+            )
+            module(
+                "app",
+                """
+                package app
+
+                import lib.*
+                import react.*
+
+                val Unplugged: FC<Props> = Wrap { _ -> }
+                """,
+                "lib",
+                applyPlugin = false,
+            )
+        }
+
+        val output = project.runAndFail(":app:compileDevelopmentExecutableKotlinJs").output
+        assertTrue(
+            "Call sites of a @ComponentWrapper function must be compiled with the Kotlin React Compiler plugin." in output,
+            "Expected opt-in error in:\n$output",
+        )
+    }
+
+    @Test
     fun `fails the build when a component wrapper does not only forward its render lambda`() {
         val project = TestProject(dir).apply {
             module(

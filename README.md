@@ -34,8 +34,10 @@ module it is applied to.
 
 The plugin rewrites the wrapper body so it takes an already-built component. Every call site then passes either a
 lowered lambda or, when the lambda cannot be lowered, `FC(lambda)`, so runtime behavior is preserved. The contract is
-checked in the declaring module (a wrapper that uses its lambda in any other way fails the build), and call sites in
-every module must be compiled with the plugin. Wrappers without the annotation are never rewritten.
+checked in the declaring module (a wrapper that uses its lambda in any other way fails the build). Call sites in every
+module must be compiled with the plugin: `@ComponentWrapper` is a `@RequiresOptIn` marker with `ERROR` level, and the
+plugin opts in the compilations it is applied to, so a module without the plugin cannot call a wrapper. Wrappers without
+the annotation are never rewritten.
 
 ## Element wrappers
 

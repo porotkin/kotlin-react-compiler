@@ -21,5 +21,7 @@ internal val COMPILER_PLUGIN_ARTIFACT: SubpluginArtifact =
 internal val ANNOTATIONS_DEPENDENCY: String =
     "${PROPERTIES.getProperty("group")}:annotations:${PROPERTIES.getProperty("version")}"
 
+internal const val COMPONENT_WRAPPER = "com.github.porotkin.reactcompiler.ComponentWrapper"
+
 internal val KOTLIN_VERSION: String =
     PROPERTIES.getProperty("kotlin")
