@@ -23,6 +23,12 @@ class ReactCompilerPlugin : KotlinCompilerPluginSupportPlugin {
     override fun getPluginArtifact(): SubpluginArtifact =
         COMPILER_PLUGIN_ARTIFACT
 
-    override fun applyToCompilation(kotlinCompilation: KotlinCompilation<*>): Provider<List<SubpluginOption>> =
-        kotlinCompilation.target.project.provider { emptyList() }
+    override fun applyToCompilation(kotlinCompilation: KotlinCompilation<*>): Provider<List<SubpluginOption>> {
+        // Test compilations see the annotations through their associated main compilation
+        if (kotlinCompilation.name == KotlinCompilation.MAIN_COMPILATION_NAME) {
+            kotlinCompilation.defaultSourceSet.dependencies { api(ANNOTATIONS_DEPENDENCY) }
+        }
+
+        return kotlinCompilation.target.project.provider { emptyList() }
+    }
 }

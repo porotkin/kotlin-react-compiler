@@ -17,5 +17,9 @@ internal val COMPILER_PLUGIN_ARTIFACT: SubpluginArtifact =
         version = PROPERTIES.getProperty("version"),
     )
 
+/** The `@ComponentWrapper` / `@ElementWrapper` annotations, an `api` dependency of every main JS compilation. */
+internal val ANNOTATIONS_DEPENDENCY: String =
+    "${PROPERTIES.getProperty("group")}:annotations:${PROPERTIES.getProperty("version")}"
+
 internal val KOTLIN_VERSION: String =
     PROPERTIES.getProperty("kotlin")

@@ -28,15 +28,9 @@ plugins {
 ## Component wrappers
 
 A function returning `FC` that takes a `ChildrenBuilder.(props) -> Unit` render lambda and only passes it to
-`FC(render)` (or to another wrapper) can opt in to lowering its call sites. Declare the marker annotation in your
-project (it is matched by its fully qualified name) and annotate the wrapper:
-
-```kotlin
-package com.github.porotkin.reactcompiler
-
-@Target(AnnotationTarget.FUNCTION)
-annotation class ComponentWrapper
-```
+`FC(render)` (or to another wrapper) can opt in to lowering its call sites by annotating it with
+`@com.github.porotkin.reactcompiler.ComponentWrapper`. The plugin adds the `annotations` artifact to every Kotlin/JS
+module it is applied to.
 
 The plugin rewrites the wrapper body so it takes an already-built component. Every call site then passes either a
 lowered lambda or, when the lambda cannot be lowered, `FC(lambda)`, so runtime behavior is preserved. The contract is
@@ -47,14 +41,8 @@ every module must be compiled with the plugin. Wrappers without the annotation a
 
 A class with a single public `ElementType` property and a final, non-overriding member `operator fun invoke` taking
 `ChildrenBuilder`, prop parameters, and a `ChildrenBuilder.() -> Unit` block can opt in to lowering its call sites to
-`jsx()` by annotating `invoke` with `@ElementWrapper`:
-
-```kotlin
-package com.github.porotkin.reactcompiler
-
-@Target(AnnotationTarget.FUNCTION)
-annotation class ElementWrapper
-```
+`jsx()` by annotating `invoke` with `@com.github.porotkin.reactcompiler.ElementWrapper`. Call sites compiled without
+the plugin run the `invoke` body as is.
 
 The declaring module verifies at compile time that `invoke` is final and non-overriding, that every parameter matches a
 writable property on the element's `PropsWithChildren` type, and that the body only invokes the `ElementType` property,

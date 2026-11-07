@@ -19,7 +19,8 @@ internal class TestProject(
 
     /**
      * Adds a module compiled with the plugin. It depends on the React stubs, which, like kotlin-react, are compiled
-     * without the plugin, and on the modules in [dependsOn].
+     * without the plugin, and on the modules in [dependsOn]. A module compiled without the plugin gets the annotations
+     * artifact explicitly, as a project that adds it by hand would.
      */
     fun module(
         name: String,
@@ -28,7 +29,8 @@ internal class TestProject(
         applyPlugin: Boolean = true,
     ) {
         modules += name
-        val dependencies = (listOf(STUBS_MODULE) + dependsOn).joinToString("; ") { "implementation(project(\":$it\"))" }
+        val annotations = if (applyPlugin) emptyList() else listOf("implementation(\"$ANNOTATIONS_MODULE:$pluginVersion\")")
+        val dependencies = ((listOf(STUBS_MODULE) + dependsOn).map { "implementation(project(\":$it\"))" } + annotations).joinToString("; ")
         val pluginsBlock = if (applyPlugin) "plugins {\n    id(\"$pluginId\")\n}\n" else ""
         write(
             "$name/build.gradle.kts",
@@ -61,7 +63,6 @@ internal class TestProject(
     private fun writeRootBuild() {
         write("$STUBS_MODULE/build.gradle.kts", "")
         write("$STUBS_MODULE/src/jsMain/kotlin/ReactStubs.kt", if (externalProps) REACT_EXTERNAL_STUBS else REACT_STUBS)
-        write("$STUBS_MODULE/src/jsMain/kotlin/ReactAnnotations.kt", REACT_ANNOTATIONS)
         write("$STUBS_MODULE/src/jsMain/kotlin/ReactRawStubs.kt", REACT_RAW_STUBS)
         write("$STUBS_MODULE/src/jsMain/kotlin/ReactJsxStubs.kt", REACT_JSX_STUBS)
         write(
@@ -109,14 +110,7 @@ internal class TestProject(
 
 private const val STUBS_MODULE = "react-stubs"
 
-private val REACT_ANNOTATIONS =
-    """
-    package com.github.porotkin.reactcompiler
-
-    annotation class ComponentWrapper
-
-    annotation class ElementWrapper
-    """.trimIndent() + "\n"
+private const val ANNOTATIONS_MODULE = "io.github.porotkin.reactcompiler:annotations"
 
 private val REACT_STUBS =
     """
