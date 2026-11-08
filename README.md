@@ -25,6 +25,13 @@ plugins {
 - **Hook argument reordering (`useMemo` / `useCallback`):** Rewrites `kotlin-react`'s `(vararg dependencies, callback)` hook calls to `useMemoRaw(callback, dependencies)` / `useCallbackRaw(callback, dependencies)` in IR before Kotlin/JS lowers arguments into reversed evaluation-order temporaries or applies Seskar `@JsRaw` value-class dependency array wrappers.
 - **Custom hook directive injection (`use*`):** Prepends `js("\"use memo\"")` to top-level `use*` functions so React Compiler compiles them in `annotation` mode and preserves top-level hook calls inside hoisted `$lambda` helpers.
 
+## Opting out
+
+React Compiler leaves a component lambda, helper, or `use*` function whose body starts with `js("\"use no memo\"")`
+as is: the opt-out wins over the `"use memo"` the plugin puts before it. Use it where render reads values that change without changing identity, such as
+the table, rows, columns, or virtualizer of TanStack Table / Virtual received from another hook: the compiler only
+skips functions that call those libraries' hooks themselves.
+
 ## Component wrappers
 
 A function returning `FC` that takes a `ChildrenBuilder.(props) -> Unit` render lambda and only passes it to

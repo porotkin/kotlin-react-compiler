@@ -1,5 +1,6 @@
 package com.github.porotkin.reactcompiler
 
+import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -32,6 +33,36 @@ class HookLoweringTest : PluginTest() {
 
         assertTrue("return useMemo(tmp, useList\$lambda(elements));" in mjs, "Expected spread useMemo left as is in:\n$mjs")
         assertFalse("'use memo';" in mjs, "Expected no 'use memo' in spread/suspend/member hooks in:\n$mjs")
+    }
+
+    @Test
+    fun `leaves hooks and components that start with use no memo uncompiled`() {
+        val mjs = compile(
+            """
+            interface ItemProps : FragmentProps {
+                var title: String
+            }
+
+            val span: ElementType<ItemProps> = "span".unsafeCast<ElementType<ItemProps>>()
+
+            fun useTitle(props: ItemProps): String {
+                js("\"use no memo\"")
+                return useMemo(props.title) { props.title }
+            }
+
+            val Title: FC<ItemProps> = FC { props ->
+                js("\"use no memo\"")
+                span { +props.title }
+            }
+            """,
+        )
+
+        assertEquals(
+            2,
+            Regex("'use memo';\\s*'use no memo';").findAll(mjs).count(),
+            "Expected 'use no memo' right after 'use memo', where React Compiler reads both as directives, in:\n$mjs",
+        )
+        assertTrue("function Title\$lambda(props)" in mjs, "Expected the opted-out component still lowered in:\n$mjs")
     }
 
     @Test
