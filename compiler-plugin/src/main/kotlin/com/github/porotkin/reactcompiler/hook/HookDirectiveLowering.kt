@@ -4,6 +4,7 @@ import com.github.porotkin.reactcompiler.ReactLowering
 import com.github.porotkin.reactcompiler.ReactSymbols
 import com.github.porotkin.reactcompiler.any
 import com.github.porotkin.reactcompiler.irUseMemo
+import com.github.porotkin.reactcompiler.isHookName
 import com.github.porotkin.reactcompiler.isUseMemo
 import org.jetbrains.kotlin.backend.common.extensions.IrPluginContext
 import org.jetbrains.kotlin.ir.IrStatement
@@ -13,8 +14,6 @@ import org.jetbrains.kotlin.ir.declarations.IrSimpleFunction
 import org.jetbrains.kotlin.ir.expressions.IrBlockBody
 import org.jetbrains.kotlin.ir.expressions.IrCall
 import org.jetbrains.kotlin.ir.visitors.transformChildrenVoid
-
-private val HOOK_NAME = Regex("^use[A-Z0-9]")
 
 /** Prepends `"use memo"` to top-level custom hooks so React Compiler compiles them in `annotation` mode. */
 internal class HookDirectiveLowering(
@@ -39,6 +38,6 @@ internal class HookDirectiveLowering(
         parent is IrFile &&
             !isInline &&
             !isSuspend &&
-            HOOK_NAME.containsMatchIn(name.asString()) &&
+            name.isHookName() &&
             !body.any { it is IrCall && it.symbol in symbols.rawHooks }
 }

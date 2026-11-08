@@ -20,6 +20,12 @@ import org.jetbrains.kotlin.ir.visitors.acceptChildrenVoid
 import org.jetbrains.kotlin.ir.visitors.acceptVoid
 import org.jetbrains.kotlin.name.Name
 
+/** How React Compiler recognizes a hook: by name only. */
+private val HOOK_NAME = Regex("^use[A-Z0-9]")
+
+internal fun Name.isHookName(): Boolean =
+    HOOK_NAME.containsMatchIn(asString())
+
 /** React Compiler's opt-in directive: in `annotation` mode it only compiles functions that start with it. */
 private const val USE_MEMO = "\"use memo\""
 
