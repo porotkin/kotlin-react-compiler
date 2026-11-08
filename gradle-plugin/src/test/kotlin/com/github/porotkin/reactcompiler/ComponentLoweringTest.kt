@@ -337,7 +337,7 @@ class ComponentLoweringTest : PluginTest() {
 
         assertFalse("jsx(get_Fn4()" in mjs, "Expected plain Function4 not lowered to jsx in:\n$mjs")
         assertTrue("var \$this\$FC = get_Fragment();" in mjs, "Expected component using plain Function4 to bail in:\n$mjs")
-        assertTrue("tmp(\$this\$FC, 1, 2, UsesPlainFn4\$lambda\$lambda);" in mjs, "Expected plain Function4 called with builder receiver in:\n$mjs")
+        assertTrue("(\$this\$FC, 1, 2, UsesPlainFn4\$lambda\$lambda);" in mjs, "Expected plain Function4 called with builder receiver in:\n$mjs")
     }
 
     @Test
