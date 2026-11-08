@@ -2,6 +2,7 @@ package com.github.porotkin.reactcompiler.component
 
 import com.github.porotkin.reactcompiler.ReactSymbols
 import com.github.porotkin.reactcompiler.any
+import com.github.porotkin.reactcompiler.isHookName
 import org.jetbrains.kotlin.descriptors.DescriptorVisibilities
 import org.jetbrains.kotlin.ir.declarations.IrFile
 import org.jetbrains.kotlin.ir.declarations.IrParameterKind
@@ -56,7 +57,10 @@ internal class ComponentHelpers(
         return lowered.symbol
     }
 
-    /** Puts each lowered copy in the file, in place of its original or, while the original is still called, next to it. */
+    /**
+     * Puts each lowered copy in the file, in place of its original or, while the original is still called, next to it,
+     * and gives the copies that call hooks a hook name.
+     */
     fun install() {
         for (symbol in rewritten) {
             val (original, lowered) = helpers.getValue(symbol)
@@ -69,6 +73,25 @@ internal class ComponentHelpers(
                 file.declarations[index] = lowered
             }
         }
+        nameHooks()
+    }
+
+    /**
+     * A lowered copy runs its hooks in its caller's render, so to React Compiler it is a custom hook, which it only
+     * recognizes by a `use` name. Under any other name it memoizes the call on its arguments: a re-render from the
+     * copy's own state or a context then skips its hooks and React drops their state. Copies without hooks keep their
+     * name, so a caller may still call them conditionally. Renaming to a fixed point covers hooks reached through
+     * other copies.
+     */
+    private fun nameHooks() {
+        val pending = rewritten.map { helpers.getValue(it).lowered }.filterTo(mutableListOf()) { !it.name.isHookName() }
+        do {
+            val hooks = pending.filter { copy -> copy.any { it is IrCall && it.symbol.owner.name.isHookName() } }
+            for (hook in hooks) {
+                hook.name = Name.identifier("use" + hook.name.asString().replaceFirstChar(Char::uppercaseChar))
+            }
+            pending -= hooks
+        } while (hooks.isNotEmpty())
     }
 }
 

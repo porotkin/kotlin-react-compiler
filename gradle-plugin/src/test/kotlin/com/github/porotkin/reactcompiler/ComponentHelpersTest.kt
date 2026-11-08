@@ -33,8 +33,52 @@ class ComponentHelpersTest : PluginTest() {
             """,
         )
 
-        assertTrue("function GenericView_0(props)" in mjs, "Expected generic helper lowered without builder receiver in:\n$mjs")
+        assertTrue("function useGenericView(props)" in mjs, "Expected generic helper lowered without builder receiver in:\n$mjs")
         assertTrue("function GenericView\$lambda(props)" in mjs, "Expected GenericView component lowered in:\n$mjs")
+    }
+
+    @Test
+    fun `names lowered helpers that call hooks as hooks`() {
+        val mjs = compile(
+            """
+            interface ItemProps : FragmentProps {
+                var title: String
+            }
+
+            val span: ElementType<ItemProps> = "span".unsafeCast<ElementType<ItemProps>>()
+
+            val View: FC<ItemProps> = FC { props ->
+                outer(props)
+                useHeader(props)
+                Plain(props)
+            }
+
+            private fun ChildrenBuilder.useHeader(props: ItemProps) {
+                val title = useMemo(props.title.length) { props.title }
+                span { +title }
+            }
+
+            private fun ChildrenBuilder.outer(props: ItemProps) {
+                Inner(props)
+            }
+
+            private fun ChildrenBuilder.Inner(props: ItemProps) {
+                val title = useMemo(props.title.length) { props.title }
+                span { +title }
+            }
+
+            private fun ChildrenBuilder.Plain(props: ItemProps) {
+                span { +props.title }
+            }
+            """,
+        )
+
+        assertTrue("function useInner(props)" in mjs, "Expected helper calling a hook named as a hook in:\n$mjs")
+        assertTrue("function useOuter(props)" in mjs, "Expected helper reaching a hook through another helper named as a hook in:\n$mjs")
+        assertTrue("useInner(props)" in mjs.substringAfter("function useOuter(props)"), "Expected useOuter to call useInner in:\n$mjs")
+        assertTrue("useOuter(props)" in mjs.substringAfter("function View\$lambda(props)"), "Expected View to call useOuter in:\n$mjs")
+        assertTrue("function Plain(props)" in mjs, "Expected helper without hooks to keep its name in:\n$mjs")
+        assertTrue("function useHeader(props)" in mjs, "Expected helper already named as a hook to keep its name in:\n$mjs")
     }
 
     @Test
