@@ -20,7 +20,38 @@ class ComponentLoweringTest : PluginTest() {
 
         assertTrue("function Pair\$lambda(_unused_var__" in mjs, "Expected lowered component in:\n$mjs")
         assertTrue("throwIrLinkageError" !in mjs, "Expected a linkable Fragment jsx call in:\n$mjs")
-        assertTrue(Regex("""jsx\(get_Fragment\(\), \w+, null\)""") in mjs, "Expected keyless Fragment jsx call in:\n$mjs")
+        assertTrue(Regex("""jsxs\(get_Fragment\(\), \w+\)""") in mjs, "Expected keyless Fragment jsxs call in:\n$mjs")
+    }
+
+    @Test
+    fun `passes several children to jsxs, without a null key`() {
+        val mjs = compile(
+            """
+            interface LabelProps : FragmentProps {
+                var label: String?
+            }
+
+            val div: ElementType<LabelProps> = "div".unsafeCast<ElementType<LabelProps>>()
+
+            val Labels: FC<LabelProps> = FC { props ->
+                div {
+                    +"a"
+                    +"b"
+                }
+                div {
+                    key = props.label
+                    +"c"
+                    +"d"
+                }
+                div { +"e" }
+            }
+            """,
+        )
+
+        assertTrue(Regex("""import \{ jsxs as jsxs \} from 'react/jsx-runtime'""") in mjs, "Expected React's jsxs imported in:\n$mjs")
+        assertTrue(Regex("""jsxs\(type, attrs, '@rdk/\d+_\d+'\)""") in mjs, "Expected source-keyed jsxs call in:\n$mjs")
+        assertTrue(Regex("""jsxs\(type\w*, attrs\w*, (key\w*) == null \? undefined : \1\)""") in mjs, "Expected nullable key passed as undefined in:\n$mjs")
+        assertTrue(Regex("""[^s]jsx\(type\w*, attrs\w*, '@rdk/\d+_\d+'\)""") in mjs, "Expected single child kept on jsx in:\n$mjs")
     }
 
     @Test

@@ -17,6 +17,7 @@ private val KOTLIN_JS = FqName("kotlin.js")
 private val REACT = FqName("react")
 private val REACT_RAW = FqName("react.raw")
 private val JSX_RUNTIME = FqName("react.jsx.runtime")
+private val REACT_COMPILER = FqName("com.github.porotkin.reactcompiler")
 private val FRAGMENT_PROPS = classId(REACT, "FragmentProps")
 
 /** The kotlin-react, React runtime and Kotlin/JS declarations the lowerings reference. */
@@ -25,6 +26,9 @@ internal class ReactSymbols private constructor(
 ) {
     val js = function(KOTLIN_JS, "js")
     val jsx = function(JSX_RUNTIME, "jsx") { it.owner.parameters.size == 3 }
+
+    /** React's `jsxs`, declared in the annotations artifact the Gradle plugin adds: kotlin-react's is internal. */
+    val jsxs = function(REACT_COMPILER, "jsxs")
     val fragment = finder.findProperties(callable(REACT, "Fragment")).single().owner.getter!!.symbol
     val fragmentProps = classType(FRAGMENT_PROPS)
     val reactNode = classType(classId(REACT, "ReactNode")).makeNullable()

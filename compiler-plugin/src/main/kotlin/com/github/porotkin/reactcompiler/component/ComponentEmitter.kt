@@ -14,6 +14,7 @@ import org.jetbrains.kotlin.ir.builders.irBranch
 import org.jetbrains.kotlin.ir.builders.irCall
 import org.jetbrains.kotlin.ir.builders.irElseBranch
 import org.jetbrains.kotlin.ir.builders.irGet
+import org.jetbrains.kotlin.ir.builders.irIfNull
 import org.jetbrains.kotlin.ir.builders.irImplicitCast
 import org.jetbrains.kotlin.ir.builders.irNull
 import org.jetbrains.kotlin.ir.builders.irReturn
@@ -40,6 +41,8 @@ import org.jetbrains.kotlin.ir.types.IrSimpleType
 import org.jetbrains.kotlin.ir.types.IrType
 import org.jetbrains.kotlin.ir.types.IrTypeProjection
 import org.jetbrains.kotlin.ir.types.isChar
+import org.jetbrains.kotlin.ir.types.isNullable
+import org.jetbrains.kotlin.ir.util.deepCopyWithSymbols
 import org.jetbrains.kotlin.ir.util.isSubtypeOfClass
 import org.jetbrains.kotlin.ir.util.parentAsClass
 import org.jetbrains.kotlin.ir.util.patchDeclarationParents
@@ -49,7 +52,7 @@ import org.jetbrains.kotlin.ir.visitors.transformChildrenVoid
 
 /**
  * Writes an analyzed body back as IR for [fn]: `"use memo"`, the [Plain] statements in order, each element as a
- * `jsx(type, attrs, key)` call bound to a local, and a `return` of the root node. Calls to helpers go to the
+ * `jsx(type, attrs, key)` (or, with several children, `jsxs`) call bound to a local, and a `return` of the root node. Calls to helpers go to the
  * lowered helper [resolveHelper] returns.
  */
 internal class ComponentEmitter(
@@ -229,7 +232,8 @@ internal class ComponentEmitter(
             emit(item, out, children)
         }
         setChildren(attrs.value, children.nodes, out)
-        out += jsx(type, b.irGet(attrs.value), attrsType, children.key ?: element.defaultKey ?: sourceKey(element.call))
+        val key = children.key ?: element.defaultKey ?: sourceKey(element.call)
+        out += jsx(type, b.irGet(attrs.value), attrsType, key, staticChildren = children.nodes.size > 1)
         return block(out)
     }
 
@@ -254,7 +258,7 @@ internal class ComponentEmitter(
             else -> {
                 val attrs = local("attrs", b.irImplicitCast(b.irJs(symbols, "({})"), symbols.fragmentProps), out)
                 setChildren(attrs, children, out)
-                jsx(b.irCall(symbols.fragment), b.irGet(attrs), attrs.type, null)
+                jsx(b.irCall(symbols.fragment), b.irGet(attrs), attrs.type, null, staticChildren = true)
             }
         }
 
@@ -270,18 +274,35 @@ internal class ComponentEmitter(
         }
     }
 
+    /**
+     * `jsx(type, props, key)`, or, when [props] has [staticChildren] set as an array, React's `jsxs`, which kotlin-react
+     * also calls for several children: `jsx` would check the array for keys as a list.
+     */
     private fun jsx(
         type: IrExpression,
         props: IrExpression,
         propsType: IrType,
         key: IrExpression?,
+        staticChildren: Boolean = false,
     ): IrExpression =
-        b.irCall(symbols.jsx, symbols.reactNode).apply {
-            typeArguments[0] = propsType
-            arguments[0] = type
-            arguments[1] = props
-            // An unset argument means "omitted", which fails to link: kotlin-react's `jsx` has no default `defaultKey`.
-            arguments[2] = key ?: b.irNull()
+        if (!staticChildren) {
+            b.irCall(symbols.jsx, symbols.reactNode).apply {
+                typeArguments[0] = propsType
+                arguments[0] = type
+                arguments[1] = props
+                // An unset argument means "omitted", which fails to link: kotlin-react's `jsx` has no default `defaultKey`.
+                arguments[2] = key ?: b.irNull()
+            }
+        } else {
+            b.irCall(symbols.jsxs, symbols.reactNode).apply {
+                arguments[0] = type
+                arguments[1] = props
+                // React keys an element "null" for a null key, so pass none instead, as kotlin-react's `jsx` does. A
+                // nullable key is an explicit `key = ...`, which [stable] made safe to read twice.
+                arguments[2] = key?.takeIf { it.type.isNullable() }
+                    ?.let { b.irIfNull(it.type, it, b.irJs(symbols, "undefined"), it.deepCopyWithSymbols()) }
+                    ?: key
+            }
         }
 
     /** `target.member = argument` or `target.member(argument)` on a JS object. */

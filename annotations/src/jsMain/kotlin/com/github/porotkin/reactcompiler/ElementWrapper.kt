@@ -6,7 +6,8 @@ package com.github.porotkin.reactcompiler
  * and a `ChildrenBuilder.() -> Unit` block, and whose body only invokes that `ElementType` property, assigning each
  * parameter to the matching prop and calling `block()`.
  *
- * Call sites compiled with the plugin are lowered to a single `jsx()` call; other call sites run the body as is.
+ * Call sites compiled with the plugin are lowered to a single `jsx()` (or, with several children, `jsxs()`) call; other
+ * call sites run the body as is.
  */
 @Target(AnnotationTarget.FUNCTION)
 @Retention(AnnotationRetention.BINARY)
