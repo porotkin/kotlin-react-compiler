@@ -19,11 +19,63 @@ plugins {
 }
 ```
 
+The plugin is built for one Kotlin version (see the badge) and warns when applied with another. It only lowers JS
+compilations that have `kotlin-react` on the classpath.
+
 ## What It Lowers
 
-- **Component lowering (`FC`):** Rewrites `FC { ... }` component lambdas from `($this$FC, props) -> Unit` into `(props) -> ReactNode?` functions that emit `"use memo"` at the start of the body, keep hook calls at the top level, lower `ChildrenBuilder` element DSL calls into direct `jsx(type, attrs, "@rdk/<line>_<col>")` calls, and annotate top-level properties initialized with a bare component with `@EagerInitialization`.
-- **Hook argument reordering (`useMemo` / `useCallback`):** Rewrites `kotlin-react`'s `(vararg dependencies, callback)` hook calls to `useMemoRaw(callback, dependencies)` / `useCallbackRaw(callback, dependencies)` in IR before Kotlin/JS lowers arguments into reversed evaluation-order temporaries or applies Seskar `@JsRaw` value-class dependency array wrappers.
-- **Custom hook directive injection (`use*`):** Prepends `js("\"use memo\"")` to top-level `use*` functions so React Compiler compiles them in `annotation` mode and preserves top-level hook calls inside hoisted `$lambda` helpers.
+- **Component lowering (`FC`):** Rewrites `FC { ... }` component lambdas from `($this$FC, props) -> Unit` into `(props) -> ReactNode?` functions that emit `"use memo"` at the start of the body, keep hook calls at the top level, lower `ChildrenBuilder` element DSL calls into direct `jsx(type, attrs, key)` calls, and annotate top-level properties initialized with a bare component with `@EagerInitialization`. The key is the element's explicit `key` when one is set, otherwise `"@rdk/<line>_<col>"` of the call site.
+
+  ```kotlin
+  val Title = FC<TitleProps> { props ->
+      h1 { +props.title }
+  }
+  ```
+  ```js
+  function Title$lambda(props) {
+    'use memo';
+    var attrs = {};
+    attrs.children = props.title;
+    return jsx(h1, attrs, '@rdk/1_4');
+  }
+  ```
+- **Component helpers:** `private fun ChildrenBuilder.Foo(...)` functions returning `Unit` that a lowered component calls are lowered the same way when their bodies can be. The lowered copy drops the `ChildrenBuilder` receiver and replaces the original, or is added next to it as `Foo$lowered` while other code still calls the original. A lowered helper that calls hooks is renamed `useFoo`: React Compiler recognizes hooks only by name and would otherwise memoize the call and drop its hooks' state. Recursive helpers are not lowered.
+
+  ```kotlin
+  private fun ChildrenBuilder.Header(props: TitleProps) {
+      val title = useLabel(props.title)
+      h1 { +title }
+  }
+  ```
+  ```js
+  function useHeader(props) {
+    'use memo';
+    var title = useLabel(props.title);
+    var attrs = {};
+    attrs.children = title;
+    return jsx(h1, attrs, '@rdk/2_4');
+  }
+  ```
+- **Hook argument reordering (`useMemo` / `useCallback`):** Rewrites `kotlin-react`'s `(vararg dependencies, callback)` hook calls to `useMemoRaw(callback, dependencies)` / `useCallbackRaw(callback, dependencies)` in IR before Kotlin/JS lowers arguments into reversed evaluation-order temporaries or applies Seskar `@JsRaw` value-class dependency array wrappers. Dependencies other than plain variables are bound to locals first; calls spreading a vararg (`useMemo(*deps) { }`) are left as is.
+
+  ```kotlin
+  useMemo(title) { title.uppercase() }
+  ```
+  ```js
+  useMemoRaw(useLabel$lambda(title), [title])
+  ```
+- **Custom hook directive injection (`use*`):** Prepends `js("\"use memo\"")` to top-level, non-inline, non-suspend `use*` functions so React Compiler compiles them in `annotation` mode and preserves top-level hook calls inside hoisted `$lambda` helpers. Hooks that call `useMemo(*deps)` / `useCallback(*deps)` are skipped, since React Compiler rejects a dependency list that is not an array literal.
+
+  ```kotlin
+  fun useLabel(title: String): String =
+      useMemo(title) { title.uppercase() }
+  ```
+  ```js
+  function useLabel(title) {
+    'use memo';
+    return useMemoRaw(useLabel$lambda(title), [title]);
+  }
+  ```
 
 ## Opting out
 
