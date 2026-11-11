@@ -22,6 +22,11 @@ plugins {
 The plugin is built for one Kotlin version (see the badge) and warns when applied with another. It only lowers JS
 compilations that have `kotlin-react` on the classpath.
 
+The Gradle plugin also passes `-Xir-generate-inline-anonymous-functions` to the JS target, so a lambda that captures
+values is emitted where it is written: React Compiler takes a `useMemo` / `useCallback` callback only as an inline
+function. The option counts where the JavaScript is generated, so apply the plugin to the project that builds the
+executable too.
+
 ## What It Lowers
 
 - **Component lowering (`FC`):** Rewrites `FC { ... }` component lambdas from `($this$FC, props) -> Unit` into `(props) -> ReactNode?` functions that emit `"use memo"` at the start of the body, keep hook calls at the top level, and lower `ChildrenBuilder` element DSL calls into direct `jsx(type, attrs, key)` calls. The key is the element's explicit `key` when one is set, otherwise `"@rdk/<line>_<col>"` of the call site.
@@ -62,7 +67,9 @@ compilations that have `kotlin-react` on the classpath.
   useMemo(title) { title.uppercase() }
   ```
   ```js
-  useMemoRaw(useLabel$lambda(title), [title])
+  useMemoRaw(function () {
+    return title.toUpperCase();
+  }, [title])
   ```
 - **Custom hook directive injection (`use*`):** Prepends `js("\"use memo\"")` to top-level, non-inline, non-suspend `use*` functions so React Compiler compiles them in `annotation` mode and preserves top-level hook calls inside hoisted `$lambda` helpers. Hooks that call `useMemo(*deps)` / `useCallback(*deps)` are skipped, since React Compiler rejects a dependency list that is not an array literal.
 
@@ -73,7 +80,9 @@ compilations that have `kotlin-react` on the classpath.
   ```js
   function useLabel(title) {
     'use memo';
-    return useMemoRaw(useLabel$lambda(title), [title]);
+    return useMemoRaw(function () {
+      return title.toUpperCase();
+    }, [title]);
   }
   ```
 

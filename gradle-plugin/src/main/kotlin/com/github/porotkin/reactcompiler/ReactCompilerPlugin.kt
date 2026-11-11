@@ -3,6 +3,7 @@ package com.github.porotkin.reactcompiler
 import org.gradle.api.Project
 import org.gradle.api.provider.Provider
 import org.gradle.kotlin.dsl.withType
+import org.jetbrains.kotlin.gradle.dsl.HasConfigurableKotlinCompilerOptions
 import org.jetbrains.kotlin.gradle.plugin.*
 
 class ReactCompilerPlugin : KotlinCompilerPluginSupportPlugin {
@@ -27,6 +28,10 @@ class ReactCompilerPlugin : KotlinCompilerPluginSupportPlugin {
         // Test compilations see the annotations through their associated main compilation
         if (kotlinCompilation.name == KotlinCompilation.MAIN_COMPILATION_NAME) {
             kotlinCompilation.defaultSourceSet.dependencies { api(ANNOTATIONS_DEPENDENCY) }
+            // React Compiler takes a hook callback only as an inline function, not as a call to a function returning one.
+            // The option counts where the JavaScript is generated, which is why it is set for the whole target.
+            (kotlinCompilation.target as? HasConfigurableKotlinCompilerOptions<*>)
+                ?.compilerOptions?.freeCompilerArgs?.add(INLINE_LAMBDAS)
         }
         // Only modules compiled with the plugin may call @ComponentWrapper functions, whose bodies it rewrites
         kotlinCompilation.compileTaskProvider.configure { compilerOptions.optIn.add(COMPONENT_WRAPPER) }

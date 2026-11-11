@@ -23,5 +23,8 @@ internal val ANNOTATIONS_DEPENDENCY: String =
 
 internal const val COMPONENT_WRAPPER = "com.github.porotkin.reactcompiler.ComponentWrapper"
 
+/** Makes Kotlin/JS emit a lambda that captures values where it is written, instead of lifting it into a function. */
+internal const val INLINE_LAMBDAS = "-Xir-generate-inline-anonymous-functions"
+
 internal val KOTLIN_VERSION: String =
     PROPERTIES.getProperty("kotlin")
