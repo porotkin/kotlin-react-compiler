@@ -5,10 +5,11 @@ import com.github.porotkin.reactcompiler.irJs
 import com.github.porotkin.reactcompiler.irUseMemo
 import com.github.porotkin.reactcompiler.irVal
 import com.github.porotkin.reactcompiler.isUseMemo
+import org.jetbrains.kotlin.ir.IrElement
 import org.jetbrains.kotlin.ir.IrFileEntry
 import org.jetbrains.kotlin.ir.IrStatement
-import org.jetbrains.kotlin.ir.UNDEFINED_OFFSET
 import org.jetbrains.kotlin.ir.builders.IrBuilderWithScope
+import org.jetbrains.kotlin.ir.builders.at
 import org.jetbrains.kotlin.ir.builders.irBlock
 import org.jetbrains.kotlin.ir.builders.irBranch
 import org.jetbrains.kotlin.ir.builders.irCall
@@ -54,6 +55,9 @@ import org.jetbrains.kotlin.ir.visitors.transformChildrenVoid
  * Writes an analyzed body back as IR for [fn]: `"use memo"`, the [Plain] statements in order, each element as a
  * `jsx(type, attrs, key)` (or, with several children, `jsxs`) call bound to a local, and a `return` of the root node. Calls to helpers go to the
  * lowered helper [resolveHelper] returns.
+ *
+ * The nodes built for a piece of the body take its position in the file ([at]), so source maps lead from the
+ * generated code back to it.
  */
 internal class ComponentEmitter(
     private val fn: IrSimpleFunction,
@@ -75,15 +79,35 @@ internal class ComponentEmitter(
         fn.parameters -= builderParameter
         fn.returnType = symbols.reactNode
         val out = mutableListOf<IrStatement>(b.irUseMemo(symbols))
-        out += b.irReturn(node(items.filterNot { it is Plain && it.statement.isUseMemo(symbols) }, out))
+        out += returnNode(items.filterNot { it is Plain && it.statement.isUseMemo(symbols) }, out)
         val substitute = object : IrElementTransformerVoid() {
             override fun visitGetValue(expression: IrGetValue): IrExpression =
-                substitutions[expression.symbol]?.let(b::irGet) ?: expression
+                substitutions[expression.symbol]?.let { at(expression) { b.irGet(it) } } ?: expression
         }
         val body = fn.body as IrBlockBody
         body.statements.clear()
         out.mapTo(body.statements) { it.transform(substitute, null) as IrStatement }
         body.patchDeclarationParents(fn)
+    }
+
+    /** Builds with [b] at the position of [source], the code that the built nodes replace. */
+    private inline fun <T> at(
+        source: IrElement,
+        build: () -> T,
+    ): T {
+        val start = b.startOffset
+        val end = b.endOffset
+        b.at(source.startOffset, source.endOffset)
+        return build().also { b.at(start, end) }
+    }
+
+    /** Emits [items] into [out] and returns the `return` of the node they build, placed where that node is. */
+    private fun returnNode(
+        items: List<Item>,
+        out: MutableList<IrStatement>,
+    ): IrExpression {
+        val node = node(items, out)
+        return at(node) { b.irReturn(node) }
     }
 
     /** Emits [items] into [out] and returns the node they build: `null`, their only child, or a Fragment of them. */
@@ -105,8 +129,8 @@ internal class ComponentEmitter(
             is Plain -> out += item.statement.transform(returnsNull, null) as IrStatement
             is Rebind -> out += item.variable.apply { initializer = item.initializer }
             is KeyProp -> children.key = stable(item.value, "key", out)
-            is Guard -> out += guard(item)
-            is Child -> children.add(child(item, out))
+            is Guard -> out += at(item.condition) { guard(item) }
+            is Child -> children.add(at(item.source) { child(item, out) })
         }
     }
 
@@ -114,14 +138,14 @@ internal class ComponentEmitter(
     private val returnsNull = object : IrElementTransformerVoid() {
         override fun visitReturn(expression: IrReturn): IrExpression {
             expression.transformChildrenVoid(this)
-            return if (expression.returnTargetSymbol == fn.symbol) b.irReturn(b.irNull(symbols.reactNode)) else expression
+            return if (expression.returnTargetSymbol == fn.symbol) at(expression) { b.irReturn(b.irNull(symbols.reactNode)) } else expression
         }
     }
 
     /** `if (condition) { ...; return node }` */
     private fun guard(guard: Guard): IrExpression {
         val then = mutableListOf<IrStatement>()
-        then += b.irReturn(node(guard.items, then))
+        then += returnNode(guard.items, then)
         return b.irWhen(unitType, listOf(b.irBranch(guard.condition, b.irBlock(resultType = unitType) { then.forEach { +it } })))
     }
 
@@ -169,7 +193,7 @@ internal class ComponentEmitter(
         val out = mutableListOf<IrStatement>()
         val pushed = object : Children() {
             override fun add(node: IrExpression) {
-                out += dynamic(IrDynamicOperator.INVOKE, b.irGet(list), "push", node)
+                out += at(node) { dynamic(IrDynamicOperator.INVOKE, b.irGet(list), "push", node) }
             }
         }
         items.forEach { emit(it, out, pushed) }
@@ -313,14 +337,14 @@ internal class ComponentEmitter(
         argument: IrExpression,
     ): IrExpression =
         IrDynamicOperatorExpressionImpl(
-            startOffset = UNDEFINED_OFFSET,
-            endOffset = UNDEFINED_OFFSET,
+            startOffset = b.startOffset,
+            endOffset = b.endOffset,
             type = unitType,
             operator = operator,
         ).apply {
             receiver = IrDynamicMemberExpressionImpl(
-                startOffset = UNDEFINED_OFFSET,
-                endOffset = UNDEFINED_OFFSET,
+                startOffset = b.startOffset,
+                endOffset = b.endOffset,
                 type = symbols.js.owner.returnType,
                 memberName = member,
                 receiver = target,

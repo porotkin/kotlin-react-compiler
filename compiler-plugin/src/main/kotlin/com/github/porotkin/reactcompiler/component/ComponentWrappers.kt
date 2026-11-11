@@ -95,7 +95,7 @@ internal class ComponentWrappers(
         val argument = call.arguments[render.indexInParameters] ?: return
         if (isRender(argument)) return
         val renderType = render.type.substitute(wrapper.typeParameters.map { it.symbol }.zip(call.typeArguments.map { it!! }).toMap())
-        val b = DeclarationIrBuilder(context, call.symbol)
+        val b = DeclarationIrBuilder(context, call.symbol, argument.startOffset, argument.endOffset)
         val component = if (argument is IrFunctionExpression && lower(argument)) argument else b.fc(argument, renderType as IrSimpleType)
         call.arguments[render.indexInParameters] = b.irImplicitCast(component, renderType)
     }

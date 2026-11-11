@@ -25,7 +25,7 @@ internal class HookDirectiveLowering(
         val body = declaration.body as? IrBlockBody ?: return declaration
         if (declaration !is IrSimpleFunction || !declaration.isCustomHook(body)) return declaration
         if (body.statements.firstOrNull()?.isUseMemo(symbols) == true) return declaration
-        body.statements.add(0, builder(declaration.symbol).irUseMemo(symbols))
+        body.statements.add(0, builder(declaration.symbol, declaration).irUseMemo(symbols))
         return declaration
     }
 

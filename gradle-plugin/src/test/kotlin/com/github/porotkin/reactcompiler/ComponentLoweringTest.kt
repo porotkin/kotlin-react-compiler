@@ -1,8 +1,10 @@
 package com.github.porotkin.reactcompiler
 
+import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import java.io.File
 
 class ComponentLoweringTest : PluginTest() {
     @Test
@@ -52,6 +54,68 @@ class ComponentLoweringTest : PluginTest() {
         assertTrue(Regex("""jsxs\(type, attrs, '@rdk/\d+_\d+'\)""") in mjs, "Expected source-keyed jsxs call in:\n$mjs")
         assertTrue(Regex("""jsxs\(type\w*, attrs\w*, (key\w*) == null \? undefined : \1\)""") in mjs, "Expected nullable key passed as undefined in:\n$mjs")
         assertTrue(Regex("""[^s]jsx\(type\w*, attrs\w*, '@rdk/\d+_\d+'\)""") in mjs, "Expected single child kept on jsx in:\n$mjs")
+    }
+
+    @Test
+    fun `maps the code built for elements and hook calls to their lines in the source map`() {
+        compile(
+            """
+            interface LabelProps : FragmentProps {
+                var title: String
+            }
+
+            val div: ElementType<FragmentProps> = "div".unsafeCast<ElementType<FragmentProps>>()
+            val span: ElementType<LabelProps> = "span".unsafeCast<ElementType<LabelProps>>()
+
+            val Card: FC<Props> = FC { props ->
+                val label = useMemo(props.key) { "label" }
+                div {
+                    span {
+                        title = label
+                        +label
+                    }
+                }
+            }
+            """,
+        )
+        val mjs = dir.walkTopDown().first { it.name.endsWith("-app.mjs") }
+        val mapped = runNode(
+            "app",
+            """
+            const fs = await import('node:fs');
+            const { SourceMap } = await import('node:module');
+            const js = fs.readFileSync('$mjs', 'utf8').split('\n');
+            const kotlin = fs.readFileSync('${File(dir, "app/src/jsMain/kotlin/App.kt")}', 'utf8').split('\n');
+            const map = new SourceMap(JSON.parse(fs.readFileSync('$mjs.map', 'utf8')));
+            for (let line = js.indexOf("  'use memo';", js.indexOf('function Card${'$'}lambda(props) {')); js[line] !== '}'; line++) {
+              const sources = new Set();
+              for (let column = 0; column < js[line].length; column++) {
+                const entry = map.findEntry(line, column);
+                if (entry.generatedLine === line && entry.generatedColumn === column && entry.originalSource) sources.add(kotlin[entry.originalLine].trim());
+              }
+              console.log(js[line].trim().replace(/_[a-z0-9]+_k\${'$'}|@rdk\/\w+/g, '') + ' <- ' + [...sources].join(' | '));
+            }
+            """,
+        )
+
+        assertEquals(
+            """
+            'use memo'; <- val Card: FC<Props> = FC { props ->
+            var dep = props.get_key(); <- val label = useMemo(props.key) { "label" }
+            var label = useMemoRaw(Card${'$'}lambda${'$'}lambda, [dep]); <- val label = useMemo(props.key) { "label" }
+            var type = get_div(); <- div {
+            var type_0 = get_span(); <- span {
+            var attrs = {}; <- span {
+            attrs.set_title(label); <- title = label
+            attrs.set_children(label); <- span { | +label
+            var el = jsx(type_0, attrs, ''); <- span {
+            var attrs_0 = {}; <- div {
+            attrs_0.set_children(el); <- div { | span {
+            var el_0 = jsx(type, attrs_0, ''); <- div {
+            return el_0; <- div {
+            """.trimIndent(),
+            mapped,
+        )
     }
 
     @Test

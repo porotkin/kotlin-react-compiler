@@ -112,7 +112,7 @@ internal class ComponentAnalyzer(
                         }
                         val orElse = subScope(isTail).analyze(early.orElse + pending) ?: return null
                         val branches = listOf(Branch(early.condition, then), Branch(null, listOfNotNull(rebind) + orElse))
-                        items += Choice(branches, attrsUses(early.condition))
+                        items += Choice(statement, branches, attrsUses(early.condition))
                         break
                     }
                 }
@@ -206,7 +206,7 @@ internal class ComponentAnalyzer(
             val type = call.arguments[1] ?: return null
             val props = call.arguments[2] ?: return null
             if (type.uses(receiver) != 0 || props.uses(receiver) != 0) return null
-            return ChildWithProps(type, props, defaultKey, call.typeArguments[0]!!)
+            return ChildWithProps(call, type, props, defaultKey, call.typeArguments[0]!!)
         }
 
         /** An `if` / `when`; only one ending the body ([atTail]) may return, and then its branches end it too. */
@@ -220,7 +220,7 @@ internal class ComponentAnalyzer(
                 val items = subScope(atTail).analyze(branch.result.branchStatements()) ?: return null
                 Branch(branch.condition.takeUnless { branch is IrElseBranch }, items)
             }
-            return Choice(branches, expression.branches.sumOf { attrsUses(it.condition) })
+            return Choice(expression, branches, expression.branches.sumOf { attrsUses(it.condition) })
         }
 
         private fun whileLoop(loop: IrWhileLoop): WhileLoop? {

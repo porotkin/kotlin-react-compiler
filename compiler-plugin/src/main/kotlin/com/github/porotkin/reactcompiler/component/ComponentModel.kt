@@ -1,5 +1,6 @@
 package com.github.porotkin.reactcompiler.component
 
+import org.jetbrains.kotlin.ir.IrElement
 import org.jetbrains.kotlin.ir.IrStatement
 import org.jetbrains.kotlin.ir.declarations.IrSimpleFunction
 import org.jetbrains.kotlin.ir.declarations.IrValueParameter
@@ -53,6 +54,9 @@ internal class Guard(
 
 /** An item that adds child nodes. */
 internal sealed interface Child : Item {
+    /** The code this child was read from: the nodes [ComponentEmitter] builds for it take its position in the file. */
+    val source: IrElement
+
     /** Whether a node is added at all; a structure that adds none stays a [Plain] statement. */
     val addsChildren: Boolean get() = true
 }
@@ -61,6 +65,7 @@ internal sealed interface Child : Item {
 internal class Text(
     val value: IrExpression,
 ) : Child {
+    override val source get() = value
     override val receiverUses get() = 1
 }
 
@@ -84,6 +89,7 @@ internal class Element(
     val propsType: IrType,
     val items: List<Item>,
 ) : Child {
+    override val source get() = call
     override val receiverUses get() = if (defaultKey != null) 2 else 1
 }
 
@@ -91,11 +97,13 @@ internal class Element(
 internal class HelperCall(
     val call: IrCall,
 ) : Child {
+    override val source get() = call
     override val receiverUses get() = 1
 }
 
 /** `child(type, props)`, optionally keyed through `setDefaultKey`. */
 internal class ChildWithProps(
+    override val source: IrCall,
     val type: IrExpression,
     val props: IrExpression,
     val defaultKey: IrExpression?,
@@ -116,6 +124,7 @@ internal sealed class Nested(
 
 /** An `if` / `when`; without an `else` branch it adds nothing when no condition holds. */
 internal class Choice(
+    override val source: IrElement,
     val branches: List<Branch>,
     conditionUses: Int,
 ) : Nested(branches.flatMap { it.items }, conditionUses)
@@ -131,18 +140,24 @@ internal class WhileLoop(
     val loop: IrWhileLoop,
     val items: List<Item>,
     conditionUses: Int,
-) : Nested(items, conditionUses)
+) : Nested(items, conditionUses) {
+    override val source get() = loop
+}
 
 /** `repeat(times) { ... }` */
 internal class RepeatLoop(
     val call: IrCall,
     val action: IrSimpleFunction,
     val items: List<Item>,
-) : Nested(items, 0)
+) : Nested(items, 0) {
+    override val source get() = call
+}
 
 /** `value.let { parameter -> ... }` */
 internal class LetBlock(
     val value: IrExpression,
     val parameter: IrValueParameter,
     val items: List<Item>,
-) : Nested(items, 0)
+) : Nested(items, 0) {
+    override val source get() = value
+}

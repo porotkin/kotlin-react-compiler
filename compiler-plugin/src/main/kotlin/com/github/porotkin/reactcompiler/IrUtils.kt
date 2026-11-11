@@ -4,7 +4,6 @@ import org.jetbrains.kotlin.backend.common.extensions.IrPluginContext
 import org.jetbrains.kotlin.backend.common.lower.DeclarationIrBuilder
 import org.jetbrains.kotlin.ir.IrElement
 import org.jetbrains.kotlin.ir.IrStatement
-import org.jetbrains.kotlin.ir.UNDEFINED_OFFSET
 import org.jetbrains.kotlin.ir.builders.IrBuilderWithScope
 import org.jetbrains.kotlin.ir.builders.declarations.buildVariable
 import org.jetbrains.kotlin.ir.builders.irAnnotation
@@ -64,13 +63,13 @@ internal fun IrBuilderWithScope.irJs(
 ): IrCall =
     irCall(symbols.js).apply { arguments[0] = irString(code) }
 
-/** `val <name> = <value>`, a local of [parent]. */
+/** `val <name> = <value>`, a local of [parent] at the position of [value]. */
 internal fun irVal(
     parent: IrDeclarationParent,
     name: String,
     value: IrExpression,
 ): IrVariable =
-    buildVariable(parent, UNDEFINED_OFFSET, UNDEFINED_OFFSET, IrDeclarationOrigin.DEFINED, Name.identifier(name), value.type)
+    buildVariable(parent, value.startOffset, value.endOffset, IrDeclarationOrigin.DEFINED, Name.identifier(name), value.type)
         .apply { initializer = value }
 
 internal fun IrBuilderWithScope.irUseMemo(symbols: ReactSymbols): IrCall =

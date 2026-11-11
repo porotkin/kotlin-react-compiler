@@ -4,7 +4,7 @@ import org.jetbrains.kotlin.backend.common.FileLoweringPass
 import org.jetbrains.kotlin.backend.common.IrElementTransformerVoidWithContext
 import org.jetbrains.kotlin.backend.common.extensions.IrPluginContext
 import org.jetbrains.kotlin.backend.common.lower.DeclarationIrBuilder
-import org.jetbrains.kotlin.ir.UNDEFINED_OFFSET
+import org.jetbrains.kotlin.ir.IrElement
 import org.jetbrains.kotlin.ir.declarations.IrFile
 import org.jetbrains.kotlin.ir.symbols.IrSymbol
 
@@ -21,6 +21,10 @@ internal abstract class ReactLowering(
         irFile.transform(this, null)
     }
 
-    protected fun builder(symbol: IrSymbol): DeclarationIrBuilder =
-        DeclarationIrBuilder(context, symbol, UNDEFINED_OFFSET, UNDEFINED_OFFSET)
+    /** A builder of the nodes that replace [source]: they take its position, which source maps lead back to. */
+    protected fun builder(
+        symbol: IrSymbol,
+        source: IrElement,
+    ): DeclarationIrBuilder =
+        DeclarationIrBuilder(context, symbol, source.startOffset, source.endOffset)
 }

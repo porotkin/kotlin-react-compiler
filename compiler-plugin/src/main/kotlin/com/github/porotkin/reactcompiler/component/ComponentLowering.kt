@@ -56,9 +56,9 @@ internal class ComponentLowering(
     /** `FC { }` with a lowerable lambda, or `FC(render)` in a wrapper, whose render parameter now holds the component. */
     private fun lowerFactoryCall(call: IrCall): IrExpression {
         val argument = call.arguments[0]
-        if (wrappers.isRender(argument)) return builder(call.symbol).irImplicitCast(argument!!, call.type)
+        if (wrappers.isRender(argument)) return builder(call.symbol, call).irImplicitCast(argument!!, call.type)
         if (argument !is IrFunctionExpression || !lowerLambda(argument)) return call
-        return builder(call.symbol).irImplicitCast(argument, call.type)
+        return builder(call.symbol, call).irImplicitCast(argument, call.type)
     }
 
     /** Rewrites a `ChildrenBuilder.(props) -> Unit` lambda into a `(props) -> ReactNode?` one, if its body can be. */
@@ -78,6 +78,6 @@ internal class ComponentLowering(
         builderParameter: IrValueParameter,
         items: List<Item>,
     ) {
-        ComponentEmitter(fn, symbols, builder(fn.symbol), fileEntry, helpers::resolve).rewrite(builderParameter, items)
+        ComponentEmitter(fn, symbols, builder(fn.symbol, fn), fileEntry, helpers::resolve).rewrite(builderParameter, items)
     }
 }

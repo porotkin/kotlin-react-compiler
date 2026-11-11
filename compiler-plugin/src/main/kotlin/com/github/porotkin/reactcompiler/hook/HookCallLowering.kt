@@ -32,7 +32,7 @@ internal class HookCallLowering(
         val raw = symbols.rawHooks[expression.symbol] ?: return expression
         val dependencies = expression.arguments[0] as IrVararg?
         if (dependencies?.elements?.any { it is IrSpreadElement } == true) return expression
-        val b = builder(expression.symbol)
+        val b = builder(expression.symbol, expression)
         val locals = mutableListOf<IrVariable>()
         dependencies?.elements?.replaceAll { dependency ->
             if (dependency is IrGetValue) {
