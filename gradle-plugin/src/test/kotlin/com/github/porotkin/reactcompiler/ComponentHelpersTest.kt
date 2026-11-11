@@ -34,7 +34,7 @@ class ComponentHelpersTest : PluginTest() {
         )
 
         assertTrue("function useGenericView(props)" in mjs, "Expected generic helper lowered without builder receiver in:\n$mjs")
-        assertTrue("function GenericView\$lambda(props)" in mjs, "Expected GenericView component lowered in:\n$mjs")
+        assertTrue(isLowered(mjs, "GenericView\$lambda"), "Expected GenericView component lowered in:\n$mjs")
     }
 
     @Test

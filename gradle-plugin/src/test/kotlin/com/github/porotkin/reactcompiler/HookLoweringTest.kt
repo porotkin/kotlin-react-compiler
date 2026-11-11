@@ -75,7 +75,7 @@ class HookLoweringTest : PluginTest() {
             Regex("'use memo';\\s*'use no memo';").findAll(mjs).count(),
             "Expected 'use no memo' right after 'use memo', where React Compiler reads both as directives, in:\n$mjs",
         )
-        assertTrue("function Title\$lambda(props)" in mjs, "Expected the opted-out component still lowered in:\n$mjs")
+        assertTrue(isLowered(mjs, "Title\$lambda"), "Expected the opted-out component still lowered in:\n$mjs")
     }
 
     @Test

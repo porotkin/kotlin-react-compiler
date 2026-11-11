@@ -48,6 +48,16 @@ abstract class PluginTest {
         return output
     }
 
+    /**
+     * Whether the function [name] of [mjs] is lowered: its body then starts with the directive. Its parameters do not
+     * tell, because the stub `FC` is inline and a component left as it was takes just `props` too.
+     */
+    protected fun isLowered(
+        mjs: String,
+        name: String,
+    ): Boolean =
+        Regex("""function ${Regex.escape(name)}\([^)]*\) \{\s+(?:_init_properties_\w+\(\);\s+)?'use memo';""") in mjs
+
     /** Compiles [declarations] in an `app` module importing `react.*` and returns the module's JavaScript. */
     protected fun compile(declarations: String): String {
         TestProject(dir).apply { module("app", "package app\n\nimport react.*\n\n${declarations.trimIndent()}") }

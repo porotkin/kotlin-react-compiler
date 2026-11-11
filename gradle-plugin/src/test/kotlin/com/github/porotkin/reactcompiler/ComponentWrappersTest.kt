@@ -47,8 +47,8 @@ class ComponentWrappersTest : PluginTest() {
             """,
         )
 
-        assertTrue("function GuardedContainer\$lambda(props)" in mjs, "Expected GuardedContainer component lowered in:\n$mjs")
-        assertTrue("function UsesInherited\$lambda(props)" in mjs, "Expected the lambda of an inherited wrapper lowered in:\n$mjs")
+        assertTrue(isLowered(mjs, "GuardedContainer\$lambda"), "Expected GuardedContainer component lowered in:\n$mjs")
+        assertTrue(isLowered(mjs, "UsesInherited\$lambda"), "Expected the lambda of an inherited wrapper lowered in:\n$mjs")
         assertTrue("GuardedContainer = memo(render);" in mjs, "Expected Popup wrapper lowered without FC wrapper in:\n$mjs")
     }
 

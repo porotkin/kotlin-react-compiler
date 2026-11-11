@@ -51,7 +51,7 @@ class ReactCompilerPluginTest : PluginTest() {
         val mjs = dir.walkTopDown().first { it.extension == "mjs" && "Counter" in it.readText() }.readText()
         assertTrue("'use memo';" in mjs, "Expected 'use memo' directive in:\n$mjs")
         assertTrue("useMemoRaw(" in mjs && "useCallbackRaw(" in mjs, "Expected raw hook calls in:\n$mjs")
-        assertTrue("function Counter\$lambda(props)" in mjs, "Expected lowered 1-arg component in:\n$mjs")
+        assertTrue(isLowered(mjs, "Counter\$lambda"), "Expected lowered 1-arg component in:\n$mjs")
         assertTrue("jsx(" in mjs, "Expected lowered jsx call in:\n$mjs")
         assertTrue("@rdk/" in mjs, "Expected @rdk/ source key in:\n$mjs")
     }

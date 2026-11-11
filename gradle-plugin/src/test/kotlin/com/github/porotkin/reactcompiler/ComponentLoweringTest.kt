@@ -20,7 +20,7 @@ class ComponentLoweringTest : PluginTest() {
             """,
         )
 
-        assertTrue("function Pair\$lambda(_unused_var__" in mjs, "Expected lowered component in:\n$mjs")
+        assertTrue(isLowered(mjs, "Pair\$lambda"), "Expected lowered component in:\n$mjs")
         assertTrue("throwIrLinkageError" !in mjs, "Expected a linkable Fragment jsx call in:\n$mjs")
         assertTrue(Regex("""jsxs\(get_Fragment\(\), \w+\)""") in mjs, "Expected keyless Fragment jsxs call in:\n$mjs")
     }
@@ -237,7 +237,7 @@ class ComponentLoweringTest : PluginTest() {
             """,
         )
 
-        assertTrue("function Styled\$lambda(props)" in mjs, "Expected Styled lowered in:\n$mjs")
+        assertTrue(isLowered(mjs, "Styled\$lambda"), "Expected Styled lowered in:\n$mjs")
         assertTrue(Regex("""attrs\.set_active_[\w$]+\(true\);""") in mjs, "Expected conditional prop set on attrs in:\n$mjs")
     }
 
@@ -301,7 +301,7 @@ class ComponentLoweringTest : PluginTest() {
             """,
         )
 
-        assertTrue("function TailAndChildView\$lambda(props)" in mjs, "Expected TailAndChildView lowered in:\n$mjs")
+        assertTrue(isLowered(mjs, "TailAndChildView\$lambda"), "Expected TailAndChildView lowered in:\n$mjs")
         assertTrue("jsx(type, props, null)" in mjs, "Expected child(type, props) lowered to jsx in:\n$mjs")
     }
 
@@ -328,7 +328,7 @@ class ComponentLoweringTest : PluginTest() {
             """,
         )
 
-        assertTrue("function LetView\$lambda(props)" in mjs, "Expected LetView lowered in:\n$mjs")
+        assertTrue(isLowered(mjs, "LetView\$lambda"), "Expected LetView lowered in:\n$mjs")
         assertTrue("var text = tmp0_safe_receiver;" in mjs, "Expected let parameter bound to local in:\n$mjs")
         assertTrue(Regex("""attrs\.set_title_[\w$]+\(text\);""") in mjs, "Expected implicit-cast receiver remapped to attrs in:\n$mjs")
     }
@@ -412,7 +412,7 @@ class ComponentLoweringTest : PluginTest() {
             """,
         )
 
-        assertTrue("function SubjectWhen\$lambda(props)" in mjs, "Expected SubjectWhen lowered in:\n$mjs")
+        assertTrue(isLowered(mjs, "SubjectWhen\$lambda"), "Expected SubjectWhen lowered in:\n$mjs")
         assertTrue(Regex("""var count = props\.get_items_[\w$]+\(\)\.get_size_[\w$]+\(\);""") in mjs, "Expected subject variable emitted before branch in:\n$mjs")
         assertTrue(Regex("""var text = toString[_0-9]*\(props\.get_delimiter_[\w$]+\(\)\);""") in mjs, "Expected Char converted via toString in:\n$mjs")
     }
@@ -439,7 +439,7 @@ class ComponentLoweringTest : PluginTest() {
             """,
         )
 
-        assertTrue("function ConditionalKeyView\$lambda(props)" in mjs, "Expected ConditionalKeyView lowered in:\n$mjs")
+        assertTrue(isLowered(mjs, "ConditionalKeyView\$lambda"), "Expected ConditionalKeyView lowered in:\n$mjs")
         assertTrue(Regex("""attrs\.set_key_[\w$]+\('active-key'\);""") in mjs, "Expected conditional key set on attrs inside branch in:\n$mjs")
         assertFalse("var key = 'active-key';" in mjs, "Expected conditional key not hoisted to a var key local in:\n$mjs")
         assertTrue(Regex("""jsx\(type, attrs, '@rdk/\d+_\d+'\)""") in mjs, "Expected source key passed as 3rd argument to jsx in:\n$mjs")
@@ -792,7 +792,7 @@ class ComponentLoweringTest : PluginTest() {
         }.run(":app:compileDevelopmentExecutableKotlinJs")
 
         val mjs = dir.walkTopDown().first { it.name.endsWith("-app.mjs") }.readText()
-        assertTrue("function ProvidedView\$lambda(props)" in mjs, "Expected ProvidedView lowered in:\n$mjs")
+        assertTrue(isLowered(mjs, "ProvidedView\$lambda"), "Expected ProvidedView lowered in:\n$mjs")
         assertTrue(Regex("""get_CountContext\(\)\.get_component_[\w$]+\(\)""") in mjs, "Expected CountContext.component getter used as jsx type in:\n$mjs")
         assertTrue(Regex("""attrs\w*\.set_value_[\w$]+\(count\);""") in mjs, "Expected non-external value prop set via typed mangled setter on attrs in:\n$mjs")
         assertTrue(Regex("""attrs\w*\.set_setter_[\w$]+\(setCount\);""") in mjs, "Expected non-external setter prop set via typed mangled setter on attrs in:\n$mjs")
