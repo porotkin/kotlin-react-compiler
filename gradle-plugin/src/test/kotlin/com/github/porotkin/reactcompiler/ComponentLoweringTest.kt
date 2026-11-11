@@ -148,6 +148,30 @@ class ComponentLoweringTest : PluginTest() {
     }
 
     @Test
+    fun `lowers a component calling run, which takes the builder as its unused receiver`() {
+        val mjs = compile(
+            """
+            val div: ElementType<PropsWithValue<String>> = "div".unsafeCast<ElementType<PropsWithValue<String>>>()
+
+            val Computed: FC<PropsWithValue<String>> = FC { props ->
+                val label = run { props.value + "!" }
+                div {
+                    value = run { label + "?" }
+                    +label
+                }
+            }
+
+            @JsExport
+            fun renderComputed(): Any? =
+                Computed.asDynamic()(js("({ value: 'a' })"))
+            """,
+        )
+
+        assertTrue("'use memo';" in mjs, "Expected lowered component in:\n$mjs")
+        assertEquals("""{"value":"a!?","children":"a!"}""", runNode("app", "console.log(JSON.stringify(m.renderComputed().props));"))
+    }
+
+    @Test
     fun `keeps wrappers around a component in a property initializer`() {
         val mjs = compile(
             """

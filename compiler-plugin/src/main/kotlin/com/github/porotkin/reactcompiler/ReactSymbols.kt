@@ -13,6 +13,7 @@ import org.jetbrains.kotlin.name.ClassId
 import org.jetbrains.kotlin.name.FqName
 import org.jetbrains.kotlin.name.Name
 
+private val KOTLIN = FqName("kotlin")
 private val KOTLIN_JS = FqName("kotlin.js")
 private val REACT = FqName("react")
 private val REACT_RAW = FqName("react.raw")
@@ -25,6 +26,9 @@ internal class ReactSymbols private constructor(
     private val finder: DeclarationFinder,
 ) {
     val js = function(KOTLIN_JS, "js")
+
+    /** `run(block)`, as opposed to `T.run(block)`. */
+    val run = function(KOTLIN, "run") { it.owner.parameters.size == 1 }
     val jsx = function(JSX_RUNTIME, "jsx") { it.owner.parameters.size == 3 }
 
     /** React's `jsxs`, declared in the annotations artifact the Gradle plugin adds: kotlin-react's is internal. */
@@ -38,7 +42,7 @@ internal class ReactSymbols private constructor(
     val elementTypeClass = classSymbol(classId(REACT, "ElementType"))
     val fcClass = classSymbol(classId(REACT, "FC"))
     val charToString: IrSimpleFunctionSymbol = finder
-        .findFunctions(CallableId(classId(FqName("kotlin"), "Char"), Name.identifier("toString")))
+        .findFunctions(CallableId(classId(KOTLIN, "Char"), Name.identifier("toString")))
         .single { it.owner.parameters.size == 1 }
     val childrenSetter = finder
         .findProperties(CallableId(classId(REACT, "PropsWithChildren"), Name.identifier("children")))

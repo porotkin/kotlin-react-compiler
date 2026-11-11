@@ -48,6 +48,7 @@ private val ELEMENT_BUILDER = FqName("react.ElementBuilder")
 private val SET_DEFAULT_KEY = FqName("react.setDefaultKey")
 private val KOTLIN_REPEAT = FqName("kotlin.repeat")
 private val KOTLIN_LET = FqName("kotlin.let")
+private val KOTLIN_RUN = FqName("kotlin.run")
 
 /**
  * Reads a body written against kotlin-react's `ChildrenBuilder` DSL into the [Item] model, reading calls to
@@ -419,5 +420,18 @@ private fun IrReturn.isUnitReturn(): Boolean =
 private fun IrElement.returnsTo(owner: IrFunctionSymbol): Boolean =
     any { it is IrReturn && it.returnTargetSymbol == owner }
 
+/** Reads of [receiver], except as the receiver of a `run` that ignores it: [ComponentEmitter] drops those reads. */
 private fun IrElement.uses(receiver: IrValueSymbol): Int =
-    count { it is IrGetValue && it.symbol == receiver }
+    count { it is IrGetValue && it.symbol == receiver } - count { it is IrCall && it.ignoredRunReceiver() == receiver }
+
+/**
+ * The value this `T.run { }` is called on, when its block never reads it. In a builder lambda `run { }` written
+ * without a receiver is such a call on the builder, which the plain `run { }` can replace.
+ */
+internal fun IrCall.ignoredRunReceiver(): IrValueSymbol? {
+    val callee = symbol.owner
+    if (callee.name.asString() != "run" || arguments.size != 2 || callee.fqNameWhenAvailable != KOTLIN_RUN) return null
+    val block = (arguments[1] as? IrFunctionExpression)?.function ?: return null
+    val blockReceiver = block.parameters.singleOrNull()?.symbol ?: return null
+    return (arguments[0] as? IrGetValue)?.symbol?.takeUnless { block.any { it is IrGetValue && it.symbol == blockReceiver } }
+}

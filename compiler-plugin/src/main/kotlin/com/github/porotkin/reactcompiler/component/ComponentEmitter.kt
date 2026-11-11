@@ -43,6 +43,7 @@ import org.jetbrains.kotlin.ir.types.IrType
 import org.jetbrains.kotlin.ir.types.IrTypeProjection
 import org.jetbrains.kotlin.ir.types.isChar
 import org.jetbrains.kotlin.ir.types.isNullable
+import org.jetbrains.kotlin.ir.types.typeWith
 import org.jetbrains.kotlin.ir.util.deepCopyWithSymbols
 import org.jetbrains.kotlin.ir.util.isSubtypeOfClass
 import org.jetbrains.kotlin.ir.util.parentAsClass
@@ -83,6 +84,9 @@ internal class ComponentEmitter(
         val substitute = object : IrElementTransformerVoid() {
             override fun visitGetValue(expression: IrGetValue): IrExpression =
                 substitutions[expression.symbol]?.let { at(expression) { b.irGet(it) } } ?: expression
+
+            override fun visitCall(expression: IrCall): IrExpression =
+                if (expression.ignoredRunReceiver() == null) super.visitCall(expression) else plainRun(expression).transform(this, null)
         }
         val body = fn.body as IrBlockBody
         body.statements.clear()
@@ -99,6 +103,19 @@ internal class ComponentEmitter(
         val end = b.endOffset
         b.at(source.startOffset, source.endOffset)
         return build().also { b.at(start, end) }
+    }
+
+    /** `receiver.run { }` whose block never reads the receiver, as `run { }`: the builder it is called on is gone. */
+    private fun plainRun(call: IrCall): IrExpression {
+        val block = call.arguments[1] as IrFunctionExpression
+        block.function.parameters = emptyList()
+        block.type = b.context.irBuiltIns.functionN(0).typeWith(block.function.returnType)
+        return at(call) {
+            b.irCall(symbols.run, call.type).apply {
+                typeArguments[0] = call.typeArguments[1]
+                arguments[0] = block
+            }
+        }
     }
 
     /** Emits [items] into [out] and returns the `return` of the node they build, placed where that node is. */
