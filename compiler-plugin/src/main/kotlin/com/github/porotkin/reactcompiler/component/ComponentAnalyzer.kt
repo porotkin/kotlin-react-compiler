@@ -58,11 +58,16 @@ internal class ComponentAnalyzer(
     private val symbols: ReactSymbols,
     private val helpers: Set<IrSimpleFunctionSymbol>,
 ) {
+    /** The first statement the last [analyze] could not read, when it returned `null` over one it can name. */
+    var unsupported: IrStatement? = null
+        private set
+
     /** Reads the body of [function], whose parameter [builder] is the `ChildrenBuilder`. */
     fun analyze(
         function: IrFunction,
         builder: IrValueSymbol,
     ): List<Item>? {
+        unsupported = null
         val statements = (function.body as? IrBlockBody)?.statements ?: return null
         val scope = Scope(builder, function.symbol, isRoot = true, isTail = true, allowAttrs = false, isElementBody = false)
         return scope.analyze(statements)
@@ -98,7 +103,7 @@ internal class ComponentAnalyzer(
                     val early = earlyReturn(statement)
                     if (early == null) {
                         // Only the statement ending the body may return in a shape not split here.
-                        if (!atTail) return null
+                        if (!atTail) return reject(statement)
                     } else {
                         items += early.preamble.map(::plain)
                         val then = subScope(isTail = false).analyze(early.then) ?: return null
@@ -116,10 +121,17 @@ internal class ComponentAnalyzer(
                         break
                     }
                 }
-                items += classify(statement, atTail) ?: return null
+                items += classify(statement, atTail) ?: return reject(statement)
             }
             // A receiver read no item accounts for (e.g. the builder escaping into a function) makes the body unsafe to rewrite.
-            return items.takeIf { trimmed.sumOf { it.uses(receiver) } == items.sumOf(Item::receiverUses) }
+            if (trimmed.sumOf { it.uses(receiver) } == items.sumOf(Item::receiverUses)) return items
+            return reject(items.firstNotNullOfOrNull { (it as? Plain)?.statement?.takeIf { s -> s.uses(receiver) != it.attrsUses } })
+        }
+
+        /** Gives up on the body, over [statement] when one can be named. */
+        private fun reject(statement: IrStatement?): Nothing? {
+            unsupported = unsupported ?: statement
+            return null
         }
 
         private fun classify(

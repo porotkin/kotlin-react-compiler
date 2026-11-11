@@ -119,6 +119,35 @@ class ComponentLoweringTest : PluginTest() {
     }
 
     @Test
+    fun `notes the statement that keeps a component from being lowered, in an --info build only`() {
+        val project = TestProject(dir).apply {
+            module(
+                "app",
+                """
+                package app
+
+                import react.*
+
+                val div: ElementType<FragmentProps> = "div".unsafeCast<ElementType<FragmentProps>>()
+
+                fun render(builder: ChildrenBuilder) {}
+
+                val Escaping: FC<Props> = FC { _ ->
+                    div {
+                        render(this)
+                    }
+                }
+                """,
+            )
+        }
+        val note = "App.kt:11:9 The plugin cannot lower this code: its component stays as it is, and React Compiler does not memoize it"
+
+        assertTrue(note !in project.run(":app:compileKotlinJs").output, "Expected no note in a plain build")
+        val output = project.run(":app:compileKotlinJs", "--info", "--rerun-tasks").output
+        assertTrue(note in output, "Expected the escaping builder noted in:\n$output")
+    }
+
+    @Test
     fun `keeps wrappers around a component in a property initializer`() {
         val mjs = compile(
             """

@@ -2,6 +2,7 @@ package com.github.porotkin.reactcompiler.component
 
 import com.github.porotkin.reactcompiler.ReactLowering
 import com.github.porotkin.reactcompiler.ReactSymbols
+import com.github.porotkin.reactcompiler.reportInfo
 import org.jetbrains.kotlin.backend.common.extensions.IrPluginContext
 import org.jetbrains.kotlin.ir.IrFileEntry
 import org.jetbrains.kotlin.ir.IrStatement
@@ -67,7 +68,12 @@ internal class ComponentLowering(
         val builder = fn.parameters.singleOrNull {
             it.kind == IrParameterKind.ExtensionReceiver && it.type.classOrNull == symbols.childrenBuilderClass
         } ?: return false
-        val items = helpers.analyzer.analyze(fn, builder.symbol) ?: return false
+        val items = helpers.analyzer.analyze(fn, builder.symbol)
+        if (items == null) {
+            val problem = "The plugin cannot lower this code: its component stays as it is, and React Compiler does not memoize it"
+            context.reportInfo(currentFile, helpers.analyzer.unsupported ?: lambda, problem)
+            return false
+        }
         rewrite(fn, builder, items)
         lambda.type = context.irBuiltIns.functionN(fn.parameters.size).typeWith(fn.parameters.map { it.type } + symbols.reactNode)
         return true

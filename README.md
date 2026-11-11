@@ -77,6 +77,10 @@ compilations that have `kotlin-react` on the classpath.
   }
   ```
 
+A component whose body uses its `ChildrenBuilder` in a way the plugin cannot rewrite (passing it to another function,
+for example) is left as it is, and React Compiler does not memoize it. Run the compile task with `--info` to see each
+one, with the statement that stops the plugin.
+
 ## Opting out
 
 React Compiler leaves a component lambda, helper, or `use*` function whose body starts with `js("\"use no memo\"")`
