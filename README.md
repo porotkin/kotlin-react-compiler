@@ -22,6 +22,11 @@ plugins {
 The plugin is built for one Kotlin version (see the badge) and warns when applied with another. It only lowers JS
 compilations that have `kotlin-react` on the classpath.
 
+React Compiler itself runs over the generated JavaScript in
+[vite-plugin-react-kotlinjs](https://github.com/porotkin/vite-plugin-react-kotlinjs), which first rewrites what
+Kotlin/JS emits around these shapes: `var` locals, default arguments, and a `"use memo"` directive pushed below the
+file's property initialization call.
+
 The Gradle plugin also passes `-Xir-generate-inline-anonymous-functions` to the JS target, so a lambda that captures
 values is emitted where it is written: React Compiler takes a `useMemo` / `useCallback` callback only as an inline
 function. The option counts where the JavaScript is generated, so apply the plugin to the project that builds the
@@ -89,6 +94,11 @@ executable too.
 A component whose body uses its `ChildrenBuilder` in a way the plugin cannot rewrite (passing it to another function,
 for example) is left as it is, and React Compiler does not memoize it. Run the compile task with `--info` to see each
 one, with the statement that stops the plugin.
+
+In development, React may warn that `key` is not a prop, or that a props object with a `key` is spread into JSX, when
+the key of an element changes while its other props stay the same: React Compiler caches the props object apart from
+the `jsx()` call, and React's development build marks a props object once it has seen it with a key. Production builds
+are not affected.
 
 ## Opting out
 
