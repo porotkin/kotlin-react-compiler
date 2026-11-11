@@ -62,7 +62,7 @@ internal class ComponentLowering(
     override fun visitCall(expression: IrCall): IrExpression {
         expression.transformChildrenVoid(this)
         if (expression.symbol in symbols.componentFactories) return lowerFactoryCall(expression)
-        wrappers.lowerCall(expression, ::lowerLambda)
+        wrappers.lowerCall(expression, currentFile, ::lowerLambda)
         return expression
     }
 

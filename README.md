@@ -86,8 +86,8 @@ skips functions that call those libraries' hooks themselves.
 
 ## Component wrappers
 
-A function returning `FC` that takes a `ChildrenBuilder.(props) -> Unit` render lambda and only passes it to
-`FC(render)` (or to another wrapper) can opt in to lowering its call sites by annotating it with
+A final, non-overriding function returning `FC` that takes a `ChildrenBuilder.(props) -> Unit` render lambda and only
+passes it to `FC(render)` (or to another wrapper) can opt in to lowering its call sites by annotating it with
 `@com.github.porotkin.reactcompiler.ComponentWrapper`. The plugin adds the `annotations` artifact to every Kotlin/JS
 module it is applied to.
 
@@ -95,8 +95,10 @@ The plugin rewrites the wrapper body so it takes an already-built component. Eve
 lowered lambda or, when the lambda cannot be lowered, `FC(lambda)`, so runtime behavior is preserved. The contract is
 checked in the declaring module (a wrapper that uses its lambda in any other way fails the build). Call sites in every
 module must be compiled with the plugin: `@ComponentWrapper` is a `@RequiresOptIn` marker with `ERROR` level, and the
-plugin opts in the compilations it is applied to, so a module without the plugin cannot call a wrapper. Wrappers without
-the annotation are never rewritten.
+plugin opts in the compilations it is applied to, so a module without the plugin cannot call a wrapper. The declaring
+module must be compiled with the plugin too: a rewritten wrapper carries the same `.klib` metadata stamp as a verified
+element wrapper (below), and calling a wrapper without it fails the build. Wrappers compiled with plugin 1.0.2 or older
+have no stamp and must be recompiled. Wrappers without the annotation are never rewritten.
 
 ## Element wrappers
 

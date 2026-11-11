@@ -1,7 +1,9 @@
 package com.github.porotkin.reactcompiler
 
+import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import java.io.File
 
 class ComponentWrappersTest : PluginTest() {
     @Test
@@ -32,10 +34,21 @@ class ComponentWrappersTest : PluginTest() {
                     span { +props.title }
                 }
             }
+
+            open class Wrappers {
+                @com.github.porotkin.reactcompiler.ComponentWrapper
+                fun <P : Props> Member(render: ChildrenBuilder.(props: P) -> Unit): FC<P> =
+                    memo(FC(render))
+            }
+
+            object Inherited : Wrappers()
+
+            val UsesInherited: FC<ItemProps> = Inherited.Member { props -> span { +props.title } }
             """,
         )
 
         assertTrue("function GuardedContainer\$lambda(props)" in mjs, "Expected GuardedContainer component lowered in:\n$mjs")
+        assertTrue("function UsesInherited\$lambda(props)" in mjs, "Expected the lambda of an inherited wrapper lowered in:\n$mjs")
         assertTrue("GuardedContainer = memo(render);" in mjs, "Expected Popup wrapper lowered without FC wrapper in:\n$mjs")
     }
 
@@ -211,6 +224,133 @@ class ComponentWrappersTest : PluginTest() {
         assertTrue(
             "Call sites of a @ComponentWrapper function must be compiled with the Kotlin React Compiler plugin." in output,
             "Expected opt-in error in:\n$output",
+        )
+    }
+
+    @Test
+    fun `fails the build when a module compiled with the plugin calls a wrapper declared without it`() {
+        val project = TestProject(dir).apply {
+            module(
+                "lib",
+                """
+                package lib
+
+                import com.github.porotkin.reactcompiler.ComponentWrapper
+                import react.*
+
+                @ComponentWrapper
+                fun <P : Props> Plain(
+                    render: ChildrenBuilder.(props: P) -> Unit,
+                ): FC<P> =
+                    memo(FC(render))
+
+                @ComponentWrapper
+                inline fun <P : Props> Inline(
+                    crossinline render: ChildrenBuilder.(props: P) -> Unit,
+                ): FC<P> =
+                    memo(FC(render))
+                """,
+                applyPlugin = false,
+            )
+            module(
+                "app",
+                """
+                package app
+
+                import com.github.porotkin.reactcompiler.ComponentWrapper
+                import lib.*
+                import react.*
+
+                val UsesPlain: FC<Props> = Plain { _ -> }
+
+                val UsesInline: FC<Props> = Inline { _ -> }
+
+                @ComponentWrapper
+                fun Forwarding(render: ChildrenBuilder.(Props) -> Unit): FC<Props> =
+                    Plain(render)
+                """,
+                "lib",
+            )
+        }
+
+        val output = project.runAndFail(":app:compileDevelopmentExecutableKotlinJs").output
+        for (callSite in listOf("App.kt:7:28 @ComponentWrapper Plain", "App.kt:9:29 @ComponentWrapper Inline", "App.kt:13:5 @ComponentWrapper Plain")) {
+            assertTrue(
+                "$callSite was not rewritten by the Kotlin React Compiler plugin: apply the plugin to the module that declares it" in output,
+                "Expected an error at $callSite in:\n$output",
+            )
+        }
+    }
+
+    @Test
+    fun `trusts a wrapper declared in a file an incremental build does not recompile`() {
+        val project = TestProject(dir).apply {
+            module(
+                "app",
+                """
+                package app
+
+                import com.github.porotkin.reactcompiler.ComponentWrapper
+                import react.*
+
+                @ComponentWrapper
+                fun <P : Props> Wrap(
+                    render: ChildrenBuilder.(props: P) -> Unit,
+                ): FC<P> =
+                    memo(FC(render))
+                """,
+            )
+        }
+        val caller = File(dir, "app/src/jsMain/kotlin/Caller.kt")
+        caller.writeText("package app\n\nimport react.*\n\nval First: FC<Props> = Wrap { _ -> }\n")
+        project.run(":app:compileDevelopmentExecutableKotlinJs")
+
+        caller.appendText("\nval Second: FC<Props> = Wrap { _ -> }\n")
+        val output = project.run(":app:compileDevelopmentExecutableKotlinJs", "--debug").output
+        val recompiled = output.lines().filter { "compile iteration: " in it }.map { it.substringAfter("compile iteration: ") }
+        assertEquals(listOf(caller.relativeTo(dir).path), recompiled, "Expected an incremental build of the caller only")
+    }
+
+    @Test
+    fun `fails the build when a component wrapper has no body, is open or overrides`() {
+        val project = TestProject(dir).apply {
+            module(
+                "app",
+                """
+                package app
+
+                import com.github.porotkin.reactcompiler.ComponentWrapper
+                import react.*
+
+                abstract class Wrappers {
+                    @ComponentWrapper
+                    abstract fun Abstract(render: ChildrenBuilder.(Props) -> Unit): FC<Props>
+
+                    @ComponentWrapper
+                    open fun Open(render: ChildrenBuilder.(Props) -> Unit): FC<Props> =
+                        FC(render)
+
+                    abstract fun Plain(render: ChildrenBuilder.(Props) -> Unit): FC<Props>
+                }
+
+                object Memoized : Wrappers() {
+                    override fun Abstract(render: ChildrenBuilder.(Props) -> Unit): FC<Props> =
+                        memo(FC(render))
+
+                    @ComponentWrapper
+                    override fun Plain(render: ChildrenBuilder.(Props) -> Unit): FC<Props> =
+                        memo(FC(render))
+                }
+                """,
+            )
+        }
+
+        val errors = project.runAndFail(":app:compileDevelopmentExecutableKotlinJs").output.lines().filter { it.startsWith("e: ") }
+        // `Memoized` inherits `Open`: the inherited copy is not reported again.
+        assertEquals(
+            listOf("App.kt:8:14 @ComponentWrapper Abstract", "App.kt:11:10 @ComponentWrapper Open", "App.kt:22:14 @ComponentWrapper Plain")
+                .map { "$it must be a final, non-overriding function with a body" },
+            errors.map { it.substringAfterLast('/') },
         )
     }
 

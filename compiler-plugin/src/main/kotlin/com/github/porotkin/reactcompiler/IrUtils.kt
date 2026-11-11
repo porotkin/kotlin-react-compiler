@@ -1,23 +1,29 @@
 package com.github.porotkin.reactcompiler
 
+import org.jetbrains.kotlin.backend.common.extensions.IrPluginContext
+import org.jetbrains.kotlin.backend.common.lower.DeclarationIrBuilder
 import org.jetbrains.kotlin.ir.IrElement
 import org.jetbrains.kotlin.ir.IrStatement
 import org.jetbrains.kotlin.ir.UNDEFINED_OFFSET
 import org.jetbrains.kotlin.ir.builders.IrBuilderWithScope
 import org.jetbrains.kotlin.ir.builders.declarations.buildVariable
+import org.jetbrains.kotlin.ir.builders.irAnnotation
 import org.jetbrains.kotlin.ir.builders.irCall
 import org.jetbrains.kotlin.ir.builders.irString
 import org.jetbrains.kotlin.ir.declarations.IrDeclarationOrigin
 import org.jetbrains.kotlin.ir.declarations.IrDeclarationParent
+import org.jetbrains.kotlin.ir.declarations.IrSimpleFunction
 import org.jetbrains.kotlin.ir.declarations.IrVariable
 import org.jetbrains.kotlin.ir.expressions.IrCall
 import org.jetbrains.kotlin.ir.expressions.IrConst
 import org.jetbrains.kotlin.ir.expressions.IrExpression
 import org.jetbrains.kotlin.ir.expressions.IrTypeOperator
 import org.jetbrains.kotlin.ir.expressions.IrTypeOperatorCall
+import org.jetbrains.kotlin.ir.util.hasAnnotation
 import org.jetbrains.kotlin.ir.visitors.IrVisitorVoid
 import org.jetbrains.kotlin.ir.visitors.acceptChildrenVoid
 import org.jetbrains.kotlin.ir.visitors.acceptVoid
+import org.jetbrains.kotlin.name.FqName
 import org.jetbrains.kotlin.name.Name
 
 /** How React Compiler recognizes a hook: by name only. */
@@ -25,6 +31,28 @@ private val HOOK_NAME = Regex("^use[A-Z0-9]")
 
 internal fun Name.isHookName(): Boolean =
     HOOK_NAME.containsMatchIn(asString())
+
+private val EAGER_INITIALIZATION = FqName("kotlin.js.EagerInitialization")
+
+/**
+ * Records in `.klib` metadata that the plugin checked [function]. A compilation that gets the function from metadata
+ * (another module, or an incremental build of this one) sees no body to check, so it trusts [isStamped] instead.
+ * The stamp is `@kotlin.js.EagerInitialization`: it targets properties, so source code cannot put it on a function.
+ */
+internal fun IrPluginContext.stamp(
+    function: IrSimpleFunction,
+    symbols: ReactSymbols,
+) {
+    if (function.isStamped()) return
+    metadataDeclarationRegistrar.addMetadataVisibleAnnotationsToElement(
+        function,
+        listOf(DeclarationIrBuilder(this, function.symbol).irAnnotation(symbols.eagerInitialization)),
+    )
+}
+
+/** Whether the plugin checked this function where it was compiled, see [stamp]. */
+internal fun IrSimpleFunction.isStamped(): Boolean =
+    hasAnnotation(EAGER_INITIALIZATION)
 
 /** React Compiler's opt-in directive: in `annotation` mode it only compiles functions that start with it. */
 private const val USE_MEMO = "\"use memo\""

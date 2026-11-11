@@ -2,14 +2,13 @@ package com.github.porotkin.reactcompiler.component
 
 import com.github.porotkin.reactcompiler.ReactSymbols
 import com.github.porotkin.reactcompiler.count
+import com.github.porotkin.reactcompiler.isStamped
+import com.github.porotkin.reactcompiler.reportError
+import com.github.porotkin.reactcompiler.stamp
 import org.jetbrains.kotlin.backend.common.extensions.IrPluginContext
 import org.jetbrains.kotlin.backend.common.lower.DeclarationIrBuilder
-import org.jetbrains.kotlin.cli.common.messages.CompilerMessageLocation
-import org.jetbrains.kotlin.diagnostics.KtDiagnosticFactoryToRendererMap
-import org.jetbrains.kotlin.diagnostics.KtDiagnosticsContainer
-import org.jetbrains.kotlin.diagnostics.errorWithoutSource
-import org.jetbrains.kotlin.diagnostics.rendering.BaseDiagnosticRendererFactory
-import org.jetbrains.kotlin.diagnostics.rendering.BaseSourcelessDiagnosticRendererFactory
+import org.jetbrains.kotlin.descriptors.Modality
+import org.jetbrains.kotlin.ir.IrElement
 import org.jetbrains.kotlin.ir.builders.irCall
 import org.jetbrains.kotlin.ir.builders.irImplicitCast
 import org.jetbrains.kotlin.ir.declarations.IrFile
@@ -28,6 +27,7 @@ import org.jetbrains.kotlin.ir.types.isUnit
 import org.jetbrains.kotlin.ir.types.typeWith
 import org.jetbrains.kotlin.ir.util.hasAnnotation
 import org.jetbrains.kotlin.ir.util.isSubtypeOfClass
+import org.jetbrains.kotlin.ir.util.resolveFakeOverride
 import org.jetbrains.kotlin.ir.util.substitute
 import org.jetbrains.kotlin.name.FqName
 
@@ -36,7 +36,11 @@ private val COMPONENT_WRAPPER = FqName("com.github.porotkin.reactcompiler.Compon
 /**
  * A `@ComponentWrapper` function returns `FC` and takes a `ChildrenBuilder.(props) -> Unit` render lambda that it
  * only passes to `FC(render)` or to another wrapper. Its body is rewritten to take the already-built component,
- * so each call site passes its lambda lowered, or `FC(lambda)` when the lambda cannot be lowered.
+ * so each call site passes its lambda lowered, or `FC(lambda)` when the lambda cannot be lowered. It is final and
+ * overrides nothing, so every call reaches the rewritten body.
+ *
+ * A rewritten wrapper is [stamp]ed. One that comes from metadata without the stamp, i.e. from a module compiled
+ * without the plugin, still expects the lambda, so calling it fails the build.
  */
 internal class ComponentWrappers(
     private val context: IrPluginContext,
@@ -47,8 +51,12 @@ internal class ComponentWrappers(
         function: IrSimpleFunction,
         file: IrFile,
     ) {
-        if (!function.hasAnnotation(COMPONENT_WRAPPER)) return
-        val body = function.body ?: return
+        // An inherited wrapper is checked where it is declared.
+        if (!function.hasAnnotation(COMPONENT_WRAPPER) || function.isFakeOverride) return
+        val body = function.body
+        if (body == null || function.modality != Modality.FINAL || function.overriddenSymbols.isNotEmpty()) {
+            return report(function, file, "must be a final, non-overriding function with a body")
+        }
         val render = renderParameter(function)
             ?: return report(function, file, "must return FC and take exactly one ChildrenBuilder lambda parameter accepted by FC")
         val reads = body.count { it is IrGetValue && it.symbol == render.symbol }
@@ -62,6 +70,7 @@ internal class ComponentWrappers(
         }
         render.isCrossinline = false
         render.isNoinline = true
+        context.stamp(function, symbols)
     }
 
     /** Whether [expression] reads the render parameter of a wrapper, which holds an already-built component. */
@@ -73,10 +82,16 @@ internal class ComponentWrappers(
     /** Passes the render lambda of a wrapper [call] lowered by [lower], or as `FC(lambda)` when it cannot be. */
     fun lowerCall(
         call: IrCall,
+        file: IrFile,
         lower: (IrFunctionExpression) -> Boolean,
     ) {
         val wrapper = call.symbol.owner
         val render = renderParameter(wrapper) ?: return
+        val declaration = wrapper.resolveFakeOverride() ?: wrapper
+        if (declaration.body == null && !declaration.isStamped()) {
+            val problem = "was not rewritten by the Kotlin React Compiler plugin: apply the plugin to the module that declares it"
+            return report(wrapper, file, problem, call)
+        }
         val argument = call.arguments[render.indexInParameters] ?: return
         if (isRender(argument)) return
         val renderType = render.type.substitute(wrapper.typeParameters.map { it.symbol }.zip(call.typeArguments.map { it!! }).toMap())
@@ -119,26 +134,8 @@ internal class ComponentWrappers(
         function: IrSimpleFunction,
         file: IrFile,
         problem: String,
+        at: IrElement = function,
     ) {
-        val entry = file.fileEntry
-        val location = CompilerMessageLocation.create(
-            entry.name,
-            entry.getLineNumber(function.startOffset) + 1,
-            entry.getColumnNumber(function.startOffset) + 1,
-            null,
-        )
-        context.diagnosticReporter.report(ComponentWrapperErrors.COMPONENT_WRAPPER, "@ComponentWrapper ${function.name} $problem", location)
-    }
-}
-
-private object ComponentWrapperErrors : KtDiagnosticsContainer() {
-    val COMPONENT_WRAPPER by errorWithoutSource()
-
-    override fun getRendererFactory(): BaseDiagnosticRendererFactory = Messages
-
-    object Messages : BaseSourcelessDiagnosticRendererFactory() {
-        override val MAP by KtDiagnosticFactoryToRendererMap("ComponentWrapper") { map ->
-            map.put(COMPONENT_WRAPPER, MESSAGE_PLACEHOLDER)
-        }
+        context.reportError(file, at, "@ComponentWrapper ${function.name} $problem")
     }
 }

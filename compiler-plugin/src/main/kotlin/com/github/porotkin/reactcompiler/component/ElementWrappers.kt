@@ -1,19 +1,14 @@
 package com.github.porotkin.reactcompiler.component
 
 import com.github.porotkin.reactcompiler.ReactSymbols
+import com.github.porotkin.reactcompiler.isStamped
+import com.github.porotkin.reactcompiler.reportError
+import com.github.porotkin.reactcompiler.stamp
 import com.github.porotkin.reactcompiler.unwrapCoercion
 import org.jetbrains.kotlin.backend.common.extensions.IrPluginContext
-import org.jetbrains.kotlin.backend.common.lower.DeclarationIrBuilder
-import org.jetbrains.kotlin.cli.common.messages.CompilerMessageLocation
 import org.jetbrains.kotlin.descriptors.DescriptorVisibilities
 import org.jetbrains.kotlin.descriptors.Modality
-import org.jetbrains.kotlin.diagnostics.KtDiagnosticFactoryToRendererMap
-import org.jetbrains.kotlin.diagnostics.KtDiagnosticsContainer
-import org.jetbrains.kotlin.diagnostics.errorWithoutSource
-import org.jetbrains.kotlin.diagnostics.rendering.BaseDiagnosticRendererFactory
-import org.jetbrains.kotlin.diagnostics.rendering.BaseSourcelessDiagnosticRendererFactory
 import org.jetbrains.kotlin.ir.IrStatement
-import org.jetbrains.kotlin.ir.builders.irAnnotation
 import org.jetbrains.kotlin.ir.declarations.IrClass
 import org.jetbrains.kotlin.ir.declarations.IrFile
 import org.jetbrains.kotlin.ir.declarations.IrParameterKind
@@ -49,7 +44,6 @@ import org.jetbrains.kotlin.name.FqName
 import org.jetbrains.kotlin.name.Name
 
 private val ELEMENT_WRAPPER = FqName("com.github.porotkin.reactcompiler.ElementWrapper")
-private val EAGER_INITIALIZATION = FqName("kotlin.js.EagerInitialization")
 private val ELEMENT_BUILDER = FqName("react.ElementBuilder")
 private val SET_DEFAULT_KEY = FqName("react.setDefaultKey")
 private val KOTLIN_WITH = FqName("kotlin.with")
@@ -61,11 +55,8 @@ private val FUNCTION_1 = FqName("kotlin.Function1")
  * element's `PropsWithChildren` type, and a `ChildrenBuilder.() -> Unit` block, and its body only invokes that
  * `ElementType` property, assigning each parameter to the matching prop and calling `block()`.
  *
- * Cross-module trust: in Kotlin K2, `fir2ir` builds external `IrSimpleFunction` symbols in downstream modules from
- * `.klib` FIR metadata rather than IR flags. Verified declarations are stamped in `.klib` metadata with
- * `@kotlin.js.EagerInitialization` via `metadataDeclarationRegistrar`. Because `@EagerInitialization` has
- * `@Target(PROPERTY)` in the stdlib, user source code cannot place it on a function without a compiler target error,
- * so downstream modules can reject `@ElementWrapper` functions from modules compiled without this plugin.
+ * A verified declaration is [stamp]ed; call sites of one that comes from metadata without the stamp, i.e. from a
+ * module compiled without the plugin, are not lowered and run its body as is.
  */
 internal object ElementWrappers {
     /** Reports an `@ElementWrapper` declaration that breaks the contract; otherwise stamps it as verified in metadata. */
@@ -96,12 +87,7 @@ internal object ElementWrappers {
                 "must only delegate to its ElementType property, assigning each parameter to the matching prop and calling block()",
             )
         }
-        if (!function.hasAnnotation(EAGER_INITIALIZATION)) {
-            context.metadataDeclarationRegistrar.addMetadataVisibleAnnotationsToElement(
-                function,
-                listOf(DeclarationIrBuilder(context, function.symbol).irAnnotation(symbols.eagerInitialization)),
-            )
-        }
+        context.stamp(function, symbols)
     }
 
     /** The verified `ElementType` getter, `Props` type, and prop setters for an `@ElementWrapper` [function], or `null`. */
@@ -112,7 +98,7 @@ internal object ElementWrappers {
         if (!function.hasAnnotation(ELEMENT_WRAPPER)) return null
         val signature = signatureOf(function, symbols) ?: return null
         val propSetters = signature.propParameters.map { signature.propsClass.writablePropertySetter(it.name) ?: return null }
-        val verified = if (function.body != null) hasValidBody(function, signature, propSetters) else function.hasAnnotation(EAGER_INITIALIZATION)
+        val verified = if (function.body != null) hasValidBody(function, signature, propSetters) else function.isStamped()
         return VerifiedWrapper(signature.componentGetter, signature.propsType, propSetters).takeIf { verified }
     }
 
@@ -211,14 +197,7 @@ internal object ElementWrappers {
         file: IrFile,
         problem: String,
     ) {
-        val entry = file.fileEntry
-        val location = CompilerMessageLocation.create(
-            entry.name,
-            entry.getLineNumber(function.startOffset) + 1,
-            entry.getColumnNumber(function.startOffset) + 1,
-            null,
-        )
-        context.diagnosticReporter.report(ElementWrapperErrors.ELEMENT_WRAPPER, "@ElementWrapper ${function.name} $problem", location)
+        context.reportError(file, function, "@ElementWrapper ${function.name} $problem")
     }
 }
 
@@ -301,15 +280,3 @@ private fun IrStatement.unwrapKeyedComposite(builder: IrValueSymbol): IrStatemen
 
 private tailrec fun IrExpression.unwrapImplicitCast(): IrExpression =
     if (this is IrTypeOperatorCall && operator == IrTypeOperator.IMPLICIT_CAST) argument.unwrapImplicitCast() else this
-
-private object ElementWrapperErrors : KtDiagnosticsContainer() {
-    val ELEMENT_WRAPPER by errorWithoutSource()
-
-    override fun getRendererFactory(): BaseDiagnosticRendererFactory = Messages
-
-    object Messages : BaseSourcelessDiagnosticRendererFactory() {
-        override val MAP by KtDiagnosticFactoryToRendererMap("ElementWrapper") { map ->
-            map.put(ELEMENT_WRAPPER, MESSAGE_PLACEHOLDER)
-        }
-    }
-}
