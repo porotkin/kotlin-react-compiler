@@ -17,7 +17,10 @@ abstract class PluginTest {
     ): String {
         val mjsFile = root.walkTopDown().first { it.name.endsWith("-$module.mjs") }
         val reactDir = File(mjsFile.parentFile, "node_modules/react").apply { mkdirs() }
-        File(reactDir, "package.json").writeText("""{"name":"react","type":"module","main":"index.mjs"}""")
+        File(reactDir, "package.json").writeText(
+            """{"name":"react","type":"module","exports":{".":"./index.mjs","./jsx-runtime":"./jsx-runtime.mjs"}}""",
+        )
+        File(reactDir, "jsx-runtime.mjs").writeText("export const jsxs = (type, props, key) => ({ type, props, key });\n")
         File(reactDir, "index.mjs").writeText(
             """
             export const Fragment = 'Fragment';

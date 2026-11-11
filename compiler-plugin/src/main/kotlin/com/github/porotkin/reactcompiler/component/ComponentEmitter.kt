@@ -183,27 +183,26 @@ internal class ComponentEmitter(
                 substitutions[child.parameter.symbol] = local(child.parameter.name.asString(), child.value, out)
                 node(child.items, out)
             }
-            is WhileLoop -> {
-                val list = local("list", b.irJs(symbols, "([])"), out)
-                val body = loopBody(child.items, list)
-                child.loop.body = b.irBlock(resultType = unitType) { body.forEach { +it } }
-                out += child.loop
-                b.irGet(list)
-            }
-            is RepeatLoop -> {
-                val list = local("list", b.irJs(symbols, "([])"), out)
-                val body = loopBody(child.items, list)
-                (child.action.body as IrBlockBody).statements.apply {
-                    clear()
-                    addAll(body)
-                }
-                out += child.call
-                b.irGet(list)
-            }
+            is WhileLoop -> list(child, out)
+            is RepeatLoop -> list(child, out)
         }
 
-    /** Emits [items] as a loop body that pushes each child onto [list]. */
-    private fun loopBody(
+    /** The array [loop] fills with its children. */
+    private fun list(
+        loop: Nested,
+        out: MutableList<IrStatement>,
+    ): IrExpression {
+        val list = local("list", b.irJs(symbols, "([])"), out)
+        pushNested(loop, list, out)
+        return b.irGet(list)
+    }
+
+    /**
+     * Emits [items] as statements that push each child onto [list]. So do the children of the branches, blocks and
+     * loops nested in them, one by one, the way the builder adds them to its parent: as a Fragment or an array of
+     * their own they would be one list item without a key, and React would tell the items of [list] apart by position.
+     */
+    private fun pushAll(
         items: List<Item>,
         list: IrVariable,
     ): List<IrStatement> {
@@ -213,8 +212,42 @@ internal class ComponentEmitter(
                 out += at(node) { dynamic(IrDynamicOperator.INVOKE, b.irGet(list), "push", node) }
             }
         }
-        items.forEach { emit(it, out, pushed) }
+        for (item in items) {
+            if (item is Nested) at(item.source) { pushNested(item, list, out) } else emit(item, out, pushed)
+        }
         return out
+    }
+
+    /** Emits into [out] the statements with which [nested] pushes its children onto [list]. */
+    private fun pushNested(
+        nested: Nested,
+        list: IrVariable,
+        out: MutableList<IrStatement>,
+    ) {
+        when (nested) {
+            is Choice -> out += b.irWhen(
+                unitType,
+                nested.branches.map { branch ->
+                    val body = block(pushAll(branch.items, list), unitType)
+                    branch.condition?.let { b.irBranch(it, body) } ?: b.irElseBranch(body)
+                },
+            )
+            is LetBlock -> {
+                substitutions[nested.parameter.symbol] = local(nested.parameter.name.asString(), nested.value, out)
+                out += pushAll(nested.items, list)
+            }
+            is WhileLoop -> {
+                nested.loop.body = block(pushAll(nested.items, list), unitType)
+                out += nested.loop
+            }
+            is RepeatLoop -> {
+                (nested.action.body as IrBlockBody).statements.apply {
+                    clear()
+                    addAll(pushAll(nested.items, list))
+                }
+                out += nested.call
+            }
+        }
     }
 
     private fun helperCall(call: IrCall): IrExpression =
@@ -384,8 +417,11 @@ internal class ComponentEmitter(
     ): IrVariable =
         irVal(fn, name, value).also(out::add)
 
-    private fun block(statements: List<IrStatement>): IrExpression =
-        b.irBlock(resultType = symbols.reactNode) { statements.forEach { +it } }
+    private fun block(
+        statements: List<IrStatement>,
+        type: IrType = symbols.reactNode,
+    ): IrExpression =
+        b.irBlock(resultType = type) { statements.forEach { +it } }
 
     private fun sourceKey(call: IrCall): IrExpression? {
         if (call.startOffset < 0) return null

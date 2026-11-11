@@ -172,6 +172,54 @@ class ComponentLoweringTest : PluginTest() {
     }
 
     @Test
+    fun `adds what a branch, a block or a nested loop adds in a loop to its list one by one`() {
+        compile(
+            """
+            val div: ElementType<FragmentProps> = "div".unsafeCast<ElementType<FragmentProps>>()
+
+            val Rows: FC<PropsWithValue<Array<String>>> = FC { props ->
+                div {
+                    for (item in props.value) {
+                        if (item != "skip") {
+                            div {
+                                key = item
+                            }
+                            div {
+                                key = item + "-note"
+                            }
+                        } else {
+                            div {
+                                key = "skipped"
+                            }
+                        }
+                        item.takeIf { it == "b" }?.let { last ->
+                            div {
+                                key = last + "-last"
+                            }
+                        }
+                        repeat(1) {
+                            div {
+                                key = item + "-end"
+                            }
+                        }
+                    }
+                }
+            }
+
+            @JsExport
+            fun renderRows(): Any? =
+                Rows.asDynamic()(js("({ value: ['a', 'skip', 'b'] })"))
+            """,
+        )
+
+        // Wrapped in a Fragment, the two rows of the branch would be one list item without a key.
+        assertEquals(
+            """["a","a-note","a-end","skipped","skip-end","b","b-note","b-last","b-end"]""",
+            runNode("app", "console.log(JSON.stringify(m.renderRows().props.children.map((child) => child.key)));"),
+        )
+    }
+
+    @Test
     fun `keeps wrappers around a component in a property initializer`() {
         val mjs = compile(
             """
