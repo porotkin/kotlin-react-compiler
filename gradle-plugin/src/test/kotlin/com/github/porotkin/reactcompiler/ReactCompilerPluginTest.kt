@@ -54,7 +54,6 @@ class ReactCompilerPluginTest : PluginTest() {
         assertTrue("function Counter\$lambda(props)" in mjs, "Expected lowered 1-arg component in:\n$mjs")
         assertTrue("jsx(" in mjs, "Expected lowered jsx call in:\n$mjs")
         assertTrue("@rdk/" in mjs, "Expected @rdk/ source key in:\n$mjs")
-        assertTrue("Counter = Counter\$lambda;" in mjs, "Expected eager initialization in:\n$mjs")
     }
 
     @Test

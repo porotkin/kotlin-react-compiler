@@ -24,7 +24,7 @@ compilations that have `kotlin-react` on the classpath.
 
 ## What It Lowers
 
-- **Component lowering (`FC`):** Rewrites `FC { ... }` component lambdas from `($this$FC, props) -> Unit` into `(props) -> ReactNode?` functions that emit `"use memo"` at the start of the body, keep hook calls at the top level, lower `ChildrenBuilder` element DSL calls into direct `jsx(type, attrs, key)` calls, and annotate top-level properties initialized with a bare component with `@EagerInitialization`. The key is the element's explicit `key` when one is set, otherwise `"@rdk/<line>_<col>"` of the call site.
+- **Component lowering (`FC`):** Rewrites `FC { ... }` component lambdas from `($this$FC, props) -> Unit` into `(props) -> ReactNode?` functions that emit `"use memo"` at the start of the body, keep hook calls at the top level, and lower `ChildrenBuilder` element DSL calls into direct `jsx(type, attrs, key)` calls. The key is the element's explicit `key` when one is set, otherwise `"@rdk/<line>_<col>"` of the call site.
 
   ```kotlin
   val Title = FC<TitleProps> { props ->

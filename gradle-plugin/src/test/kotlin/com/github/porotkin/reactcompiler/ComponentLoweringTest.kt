@@ -274,29 +274,6 @@ class ComponentLoweringTest : PluginTest() {
     }
 
     @Test
-    fun `reads a same-file component without its getter`() {
-        val mjs = compile(
-            """
-            interface BadgeProps : Props {
-                var text: String
-            }
-
-            val span: ElementType<FragmentProps> = "span".unsafeCast<ElementType<FragmentProps>>()
-
-            val Badge: FC<BadgeProps> = FC { props ->
-                span { +props.text }
-            }
-
-            val Demo: FC<BadgeProps> = FC { props ->
-                Badge { text = props.text }
-            }
-            """,
-        )
-
-        assertTrue("var type = Badge;" in mjs, "Expected Badge read without get_Badge() in:\n$mjs")
-    }
-
-    @Test
     fun `lowers when with subject variable and char unaryPlus`() {
         val mjs = compile(
             """
