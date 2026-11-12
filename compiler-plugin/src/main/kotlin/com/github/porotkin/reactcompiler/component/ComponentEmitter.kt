@@ -41,6 +41,7 @@ import org.jetbrains.kotlin.ir.symbols.IrValueSymbol
 import org.jetbrains.kotlin.ir.types.IrSimpleType
 import org.jetbrains.kotlin.ir.types.IrType
 import org.jetbrains.kotlin.ir.types.IrTypeProjection
+import org.jetbrains.kotlin.ir.types.classOrNull
 import org.jetbrains.kotlin.ir.types.isChar
 import org.jetbrains.kotlin.ir.types.isNullable
 import org.jetbrains.kotlin.ir.types.typeWith
@@ -280,7 +281,16 @@ internal class ComponentEmitter(
             b.irCall(getter, returnType).apply { arguments[0] = wrapper }
         } ?: element.call.arguments[1]!!
         val type = stable(rawType, "type", out)
-        val props = element.props.map { prop -> PropArg(prop.name, prop.setter, stable(prop.value, prop.name, out)) }
+        val props = element.props.map { prop ->
+            val value = if (prop.setter == null && prop.value.type.isValueClass()) {
+                // kotlin-react sets a provider value through a generic property, which boxes a value class, and its
+                // readers unbox it. A dynamic assignment passes the bare value: bound to `Any?`, it is boxed too.
+                b.irGet(local(prop.name, prop.value, out, b.context.irBuiltIns.anyNType))
+            } else {
+                stable(prop.value, prop.name, out)
+            }
+            PropArg(prop.name, prop.setter, value)
+        }
         // Only `provider(value) { }` sets props dynamically by name and has `ChildrenBuilder` as `element.propsType`.
         val attrsType = if (element.propsType.isSubtypeOfClass(symbols.propsClass)) element.propsType else symbols.fragmentProps
         // Created at its first use, or once the children are built, so it stays out of the code that builds them.
@@ -414,8 +424,9 @@ internal class ComponentEmitter(
         name: String,
         value: IrExpression,
         out: MutableList<IrStatement>,
+        type: IrType = value.type,
     ): IrVariable =
-        irVal(fn, name, value).also(out::add)
+        irVal(fn, name, value, type).also(out::add)
 
     private fun block(
         statements: List<IrStatement>,
@@ -438,6 +449,10 @@ private open class Children {
         nodes += node
     }
 }
+
+/** A value class or a nullable one, which Kotlin/JS passes unboxed. */
+private fun IrType.isValueClass(): Boolean =
+    classOrNull?.owner?.isValue == true
 
 private fun IrExpression.isStable(): Boolean =
     when (this) {

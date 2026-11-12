@@ -260,6 +260,39 @@ class ComponentLoweringTest : PluginTest() {
     }
 
     @Test
+    fun `boxes a value class passed as a provider value, as the generic invoke does`() {
+        val mjs = compile(
+            """
+            value class Level(val value: Int)
+
+            val LevelContext: Provider<Level> = "LevelContext".unsafeCast<Provider<Level>>()
+            val OptionalLevelContext: Provider<Level?> = "OptionalLevelContext".unsafeCast<Provider<Level?>>()
+
+            val Leveled: FC<PropsWithValue<Int>> = FC { props ->
+                val level = Level(props.value)
+                LevelContext(level) {
+                    OptionalLevelContext(level) { }
+                }
+            }
+
+            @JsExport
+            fun readLevels(): Array<Int?> {
+                val outer = Leveled.asDynamic()(js("({ value: 2 })"))
+                val inner = outer.props.children
+                return arrayOf(
+                    outer.props.value.unsafeCast<Level>().value,
+                    inner.props.value.unsafeCast<Level?>()?.value,
+                )
+            }
+            """,
+        )
+
+        assertTrue(isLowered(mjs, "Leveled\$lambda"), "Expected lowered component in:\n$mjs")
+        // Unboxed, `value` would hold the bare number, and reading the class from it would give `undefined`.
+        assertEquals("[2,2]", runNode("app", "console.log(JSON.stringify(m.readLevels()));"))
+    }
+
+    @Test
     fun `reads statements on the attrs object in an element body`() {
         val mjs = compile(
             """

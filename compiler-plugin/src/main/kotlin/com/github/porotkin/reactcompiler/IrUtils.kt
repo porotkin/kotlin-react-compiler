@@ -18,6 +18,7 @@ import org.jetbrains.kotlin.ir.expressions.IrConst
 import org.jetbrains.kotlin.ir.expressions.IrExpression
 import org.jetbrains.kotlin.ir.expressions.IrTypeOperator
 import org.jetbrains.kotlin.ir.expressions.IrTypeOperatorCall
+import org.jetbrains.kotlin.ir.types.IrType
 import org.jetbrains.kotlin.ir.util.hasAnnotation
 import org.jetbrains.kotlin.ir.visitors.IrVisitorVoid
 import org.jetbrains.kotlin.ir.visitors.acceptChildrenVoid
@@ -63,13 +64,14 @@ internal fun IrBuilderWithScope.irJs(
 ): IrCall =
     irCall(symbols.js).apply { arguments[0] = irString(code) }
 
-/** `val <name> = <value>`, a local of [parent] at the position of [value]. */
+/** `val <name>: <type> = <value>`, a local of [parent] at the position of [value]. */
 internal fun irVal(
     parent: IrDeclarationParent,
     name: String,
     value: IrExpression,
+    type: IrType = value.type,
 ): IrVariable =
-    buildVariable(parent, value.startOffset, value.endOffset, IrDeclarationOrigin.DEFINED, Name.identifier(name), value.type)
+    buildVariable(parent, value.startOffset, value.endOffset, IrDeclarationOrigin.DEFINED, Name.identifier(name), type)
         .apply { initializer = value }
 
 internal fun IrBuilderWithScope.irUseMemo(symbols: ReactSymbols): IrCall =
