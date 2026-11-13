@@ -1,6 +1,7 @@
 package com.github.porotkin.reactcompiler.lint
 
 import com.github.porotkin.reactcompiler.ReactSymbols
+import com.github.porotkin.reactcompiler.any
 import com.github.porotkin.reactcompiler.isHookName
 import com.github.porotkin.reactcompiler.optsOutOfMemo
 import org.jetbrains.kotlin.ir.IrBuiltIns
@@ -62,7 +63,8 @@ import org.jetbrains.kotlin.name.FqName
  * - [LintRule.REACT_HOOKS_AS_VALUES]: nothing but a hook is named like one, where React Compiler reads the name;
  * - [LintRule.REACT_REFS]: a ref is not read or written while rendering;
  * - [LintRule.REACT_IMMUTABILITY]: props and state are never modified, and neither are, during render, hook
- *   arguments, hook results, and values already passed to a hook or to an element.
+ *   arguments, hook results, and values already passed to a hook or to an element;
+ * - [LintRule.REACT_SET_STATE_IN_EFFECT]: an effect does not set state as soon as it runs.
  *
  * The checks follow the code as it is written: a value is known to be props, state or a hook result only through
  * the `val`s it is assigned to, and a function called from a component is not looked into. React Compiler, which
@@ -97,6 +99,9 @@ internal class RenderRules(
 
     /** The locals whose value is the same on every render, see [ExhaustiveDeps]. */
     private val stable = mutableSetOf<IrSymbol>()
+
+    /** The locals computed from the value of a ref. */
+    private val readFromRefs = mutableSetOf<IrValueSymbol>()
 
     /** Refs inside `if (ref.current == null) { ... }`, the one place render may initialize a ref. */
     private val initializedRefs = mutableListOf<IrValueSymbol>()
@@ -179,6 +184,7 @@ internal class RenderRules(
         // As React's linter has it: a constant, a ref, an effect event, and the second of what these hooks return.
         val isSetter = callee == "component2" && (call.receiver() as? IrGetValue)?.symbol?.let(hookResults::get) in HOOKS_RETURNING_SETTERS
         if (value is IrConst || callee in HOOKS_RETURNING_STABLE_VALUES || isSetter) stable += declaration.symbol
+        if (value.readsRef()) readFromRefs += declaration.symbol
     }
 
     private inline fun inFrame(
@@ -261,6 +267,10 @@ internal class RenderRules(
     private fun reactFunction(): Frame? =
         frames.lastOrNull { it.scope == Scope.COMPONENT || it.scope == Scope.HOOK }
 
+    /** The frame of the function whose body the code being visited belongs to, blocks aside. */
+    private fun enclosingFunction(): Frame =
+        frames.last { !it.scope.isBlock }
+
     /** The functions whose locals the code being visited can read as values of its own component or hook. */
     private fun localScope(): Set<IrDeclarationParent> =
         buildSet {
@@ -289,7 +299,9 @@ internal class RenderRules(
         expression.acceptChildrenVoid(this)
 
         // What only holds once the arguments have run.
+        if (isChecked) checkSetStateInEffect(expression)
         if (isRender && !site.memo) freezePassedValues(expression, callee, isHook)
+        if (callee.isSuspend) enclosingFunction().suspended = true
     }
 
     /**
@@ -430,6 +442,13 @@ internal class RenderRules(
         return property.name.asString() == "current" && receiver()?.type?.let(lint::isRef) == true
     }
 
+    /** Whether the value of this expression comes from a ref. */
+    private fun IrElement.readsRef(): Boolean =
+        any {
+            it is IrGetValue && it.symbol in readFromRefs ||
+                it is IrCall && (it.isRefAccess() || delegated[it.symbol]?.delegate?.type?.let(lint::isRefValue) == true)
+        }
+
     override fun visitPropertyReference(expression: IrPropertyReference) {
         checkRefReference(expression, expression.arguments.firstOrNull())
         expression.acceptChildrenVoid(this)
@@ -456,6 +475,29 @@ internal class RenderRules(
     override fun visitRichFunctionReference(expression: IrRichFunctionReference) {
         // The function a `::reference` invokes through is generated: only the values it is bound to are code of the file.
         if (expression.reflectionTargetSymbol == null) expression.acceptChildrenVoid(this) else expression.boundValues.forEach { it.acceptVoid(this) }
+    }
+
+    // State
+
+    /** `setState(value)`, or an assignment to a `by useState()` local. */
+    private fun IrCall.setsState(): Boolean {
+        val local = delegated[symbol]
+        return if (local != null) {
+            symbol == local.setter?.symbol && local.delegate?.type?.let(lint::isState) == true
+        } else {
+            symbol.owner.name.asString() == "invoke" && receiver()?.type?.let(lint::isStateSetter) == true
+        }
+    }
+
+    /**
+     * An effect that sets state where it starts makes React render twice for what one render could compute. State
+     * set later is not reported: in a callback the effect registers, after it suspends, or from the value of a ref,
+     * which an effect is the place to read.
+     */
+    private fun checkSetStateInEffect(call: IrCall) {
+        val effect = enclosingFunction()
+        if (effect.scope != Scope.EFFECT || effect.suspended || !call.setsState() || call.readsRef()) return
+        report(LintRule.REACT_SET_STATE_IN_EFFECT, call, "State is set as soon as the effect runs, which renders the component a second time. Compute the value during render, or set state where the change happens: in an event handler.")
     }
 
     // Immutability
@@ -586,6 +628,9 @@ private class Frame(
     var loops = 0
     var tries = 0
     var returned = false
+
+    /** Whether the function has called a suspend function: what follows runs later. */
+    var suspended = false
 }
 
 private class Site {
