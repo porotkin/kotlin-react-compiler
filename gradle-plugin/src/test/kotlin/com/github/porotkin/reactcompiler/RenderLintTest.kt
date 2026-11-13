@@ -88,4 +88,101 @@ class RenderLintTest : LintTest() {
         assertTrue("Ref value `current` is read during render." in result.output, result.output)
         assertTrue("Ref value `latest` is written during render." in result.output, result.output)
     }
+
+    @Test
+    fun `reports props and state modified, and hook arguments, hook results and passed values modified during render`() {
+        assertLint(
+            """
+            val div: ElementType<FragmentProps> = "div".unsafeCast<ElementType<FragmentProps>>()
+
+            class Settings(var enabled: Boolean = false, val tags: MutableList<String> = mutableListOf())
+
+            class Control {
+                var channel: String? = null
+            }
+
+            interface FormProps : Props {
+                var title: String
+                var settings: Settings
+                var items: MutableList<String>
+            }
+
+            fun useControl(): Control = useMemo { Control() }
+
+            fun useSettings(): Pair<Settings, Int> = Settings() to 0
+
+            val MutatesProps: FC<FormProps> = FC { props ->
+                props.title = "changed" // ! REACT_IMMUTABILITY
+                props.settings.enabled = true // ! REACT_IMMUTABILITY
+                props.items.add("item") // ! REACT_IMMUTABILITY
+                val settings = props.settings
+                settings.enabled = false // ! REACT_IMMUTABILITY
+                val items = props.items
+                items += "other" // ! REACT_IMMUTABILITY
+                div { +props.title }
+            }
+
+            val MutatesHookResults: FC<FormProps> = FC { props ->
+                val control = useControl()
+                control.channel = props.title // ! REACT_IMMUTABILITY
+                val configured = useControl().apply {
+                    channel = props.title // ! REACT_IMMUTABILITY
+                }
+                val (settings, count) = useSettings()
+                settings.enabled = count > 0 // ! REACT_IMMUTABILITY
+                useControl().channel = "direct" // ! REACT_IMMUTABILITY
+                div { +"${'$'}{control.channel} ${'$'}{configured.channel}" }
+            }
+
+            fun useNormalized(settings: Settings): Settings {
+                settings.enabled = true // ! REACT_IMMUTABILITY
+                return settings
+            }
+
+            val Styled: FC<FormProps> = FC { props ->
+                div { +props.title }
+            }
+
+            val MutatesSnapshots: FC<FormProps> = FC { props ->
+                val (items, setItems) = useState(mutableListOf<String>())
+                var selected by useState(Settings())
+                val onAdd = {
+                    items.add("item") // ! REACT_IMMUTABILITY
+                    setItems(items)
+                    selected.enabled = true // ! REACT_IMMUTABILITY
+                }
+                useEffect(props.title) {
+                    props.settings.enabled = false // ! REACT_IMMUTABILITY
+                }
+                div { +"${'$'}onAdd" }
+            }
+
+            val MutatesPassedValues: FC<FormProps> = FC { props ->
+                val styles = Settings()
+                styles.enabled = true
+                Styled { settings = styles }
+                styles.enabled = false // ! REACT_IMMUTABILITY
+                val options = Settings()
+                val normalized = useNormalized(options) // the hook above
+                options.tags.add("late") // ! REACT_IMMUTABILITY
+                div { +"${'$'}normalized ${'$'}{props.title}" }
+            }
+
+            val Allowed: FC<FormProps> = FC { props ->
+                val control = useControl()
+                val local = Settings()
+                local.enabled = true
+                local.tags.add("tag")
+                val copy = props.items.toMutableList()
+                copy.add("item")
+                useEffect(control) { control.channel = props.title }
+                val onClick = { control.channel = null }
+                div {
+                    key = props.title
+                    +"${'$'}local ${'$'}copy ${'$'}onClick"
+                }
+            }
+            """,
+        )
+    }
 }

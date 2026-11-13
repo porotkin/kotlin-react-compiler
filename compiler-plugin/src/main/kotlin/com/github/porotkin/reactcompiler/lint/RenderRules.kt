@@ -18,6 +18,7 @@ import org.jetbrains.kotlin.ir.declarations.IrValueParameter
 import org.jetbrains.kotlin.ir.declarations.IrVariable
 import org.jetbrains.kotlin.ir.expressions.IrCall
 import org.jetbrains.kotlin.ir.expressions.IrConst
+import org.jetbrains.kotlin.ir.expressions.IrContainerExpression
 import org.jetbrains.kotlin.ir.expressions.IrExpression
 import org.jetbrains.kotlin.ir.expressions.IrFunctionExpression
 import org.jetbrains.kotlin.ir.expressions.IrGetValue
@@ -27,17 +28,22 @@ import org.jetbrains.kotlin.ir.expressions.IrReturn
 import org.jetbrains.kotlin.ir.expressions.IrRichFunctionReference
 import org.jetbrains.kotlin.ir.expressions.IrRichPropertyReference
 import org.jetbrains.kotlin.ir.expressions.IrTry
+import org.jetbrains.kotlin.ir.expressions.IrTypeOperatorCall
+import org.jetbrains.kotlin.ir.expressions.IrVararg
 import org.jetbrains.kotlin.ir.expressions.IrWhen
 import org.jetbrains.kotlin.ir.symbols.IrSimpleFunctionSymbol
 import org.jetbrains.kotlin.ir.symbols.IrSymbol
 import org.jetbrains.kotlin.ir.symbols.IrValueSymbol
+import org.jetbrains.kotlin.ir.types.IrType
 import org.jetbrains.kotlin.ir.types.classOrNull
+import org.jetbrains.kotlin.ir.types.isArray
 import org.jetbrains.kotlin.ir.util.fqNameWhenAvailable
 import org.jetbrains.kotlin.ir.util.isEffectivelyExternal
 import org.jetbrains.kotlin.ir.util.isFunction
 import org.jetbrains.kotlin.ir.util.isFunctionMarker
 import org.jetbrains.kotlin.ir.util.isFunctionTypeOrSubtype
 import org.jetbrains.kotlin.ir.util.isGetter
+import org.jetbrains.kotlin.ir.util.isPrimitiveArray
 import org.jetbrains.kotlin.ir.util.isSetter
 import org.jetbrains.kotlin.ir.util.isSubtypeOfClass
 import org.jetbrains.kotlin.ir.util.isSuspendFunction
@@ -54,7 +60,13 @@ import org.jetbrains.kotlin.name.FqName
  * - [LintRule.REACT_RULES_OF_HOOKS]: a hook call sits at the top level of a component or of a hook;
  * - [LintRule.REACT_EXHAUSTIVE_DEPS]: the dependencies of a hook are complete, see [ExhaustiveDeps];
  * - [LintRule.REACT_HOOKS_AS_VALUES]: nothing but a hook is named like one, where React Compiler reads the name;
- * - [LintRule.REACT_REFS]: a ref is not read or written while rendering.
+ * - [LintRule.REACT_REFS]: a ref is not read or written while rendering;
+ * - [LintRule.REACT_IMMUTABILITY]: props and state are never modified, and neither are, during render, hook
+ *   arguments, hook results, and values already passed to a hook or to an element.
+ *
+ * The checks follow the code as it is written: a value is known to be props, state or a hook result only through
+ * the `val`s it is assigned to, and a function called from a component is not looked into. React Compiler, which
+ * tracks values further, finds more; what is reported here is reported with certainty, on the Kotlin line.
  *
  * A function that opts out of React Compiler with `"use no memo"` is still held to the Rules of Hooks and to its
  * dependencies, which React itself needs; the rest it is trusted with.
@@ -70,6 +82,12 @@ internal class RenderRules(
 
     /** The scope of each lambda passed to the call being visited, decided by what the callee does with it. */
     private val lambdaScopes = mutableMapOf<IrFunctionExpression, Scope>()
+
+    /** Props and state, and the `val`s read from them: snapshots that nothing may modify. */
+    private val snapshots = mutableSetOf<IrValueSymbol>()
+
+    /** Hook arguments, hook results, values passed to a hook or an element, and the `val`s read from them. */
+    private val frozen = mutableSetOf<IrValueSymbol>()
 
     /** The accessors of `by` locals, which a read or an assignment of the local calls. */
     private val delegated = mutableMapOf<IrSimpleFunctionSymbol, IrLocalDelegatedProperty>()
@@ -110,6 +128,7 @@ internal class RenderRules(
             else -> false
         }
         inFrame(Frame(scope, declaration, renders, declaration.optsOutOfMemo(symbols))) {
+            if (renders) declaration.arguments(withReceiver = scope == Scope.HOOK).forEach { (if (scope == Scope.HOOK) frozen else snapshots) += it.symbol }
             declaration.acceptChildrenVoid(this)
         }
     }
@@ -126,9 +145,17 @@ internal class RenderRules(
         val function = expression.function
         val scope = lambdaScopes.remove(expression) ?: if (function.isRenderLambda()) Scope.COMPONENT else Scope.CALLBACK
         inFrame(Frame(scope, function, scope == Scope.COMPONENT, function.optsOutOfMemo(symbols))) {
+            if (scope == Scope.COMPONENT) function.arguments(withReceiver = false).forEach { snapshots += it.symbol }
             function.acceptChildrenVoid(this)
         }
     }
+
+    /** The parameters of a component or hook that its caller fills in, as opposed to the builder it adds children to. */
+    private fun IrFunction.arguments(withReceiver: Boolean): List<IrValueParameter> =
+        parameters.filter {
+            val isArgument = it.kind == IrParameterKind.Regular || withReceiver && it.kind == IrParameterKind.ExtensionReceiver
+            isArgument && !it.type.isSubtypeOfClass(symbols.childrenBuilderClass)
+        }
 
     override fun visitLocalDelegatedProperty(declaration: IrLocalDelegatedProperty) {
         delegated[declaration.getter.symbol] = declaration
@@ -144,6 +171,11 @@ internal class RenderRules(
         val callee = call?.symbol?.owner?.name?.asString()
         if (call != null && call.symbol.owner.name.isHookName()) hookResults[declaration.symbol] = callee!!
         if (declaration.isVar) return
+        when (value.immutability()) {
+            Immutability.SNAPSHOT -> snapshots += declaration.symbol
+            Immutability.FROZEN -> frozen += declaration.symbol
+            Immutability.NONE -> {}
+        }
         // As React's linter has it: a constant, a ref, an effect event, and the second of what these hooks return.
         val isSetter = callee == "component2" && (call.receiver() as? IrGetValue)?.symbol?.let(hookResults::get) in HOOKS_RETURNING_SETTERS
         if (value is IrConst || callee in HOOKS_RETURNING_STABLE_VALUES || isSetter) stable += declaration.symbol
@@ -251,8 +283,13 @@ internal class RenderRules(
         // Whether the code is held to the rules of render: it is in a component or hook that has not opted out of them.
         val isChecked = reactFunction()?.let { it.renders && !it.optsOut } == true
         val isRender = isChecked && site.root != null
+        if (isChecked) checkMutation(expression, callee, isRender && !site.memo)
         if (isRender) checkRefAccess(expression, callee)
+
         expression.acceptChildrenVoid(this)
+
+        // What only holds once the arguments have run.
+        if (isRender && !site.memo) freezePassedValues(expression, callee, isHook)
     }
 
     /**
@@ -266,7 +303,16 @@ internal class RenderRules(
         call.arguments.forEachIndexed { index, argument ->
             val lambda = argument?.unwrapCasts() as? IrFunctionExpression ?: return@forEachIndexed
             val parameter = callee.parameters.getOrNull(index) ?: return@forEachIndexed
-            lambdaScopes[lambda] = scopeOf(call, callee, parameter, lambda.function)
+            val scope = scopeOf(call, callee, parameter, lambda.function)
+            lambdaScopes[lambda] = scope
+            // `value.apply { }`, `value.let { }`: the lambda's first parameter is the call's first argument.
+            val subject = call.arguments[0].takeIf { scope == Scope.BLOCK && index > 0 && callee.fqNameWhenAvailable in SCOPE_FUNCTIONS }
+            val alias = lambda.function.parameters.firstOrNull()?.symbol ?: return@forEachIndexed
+            when (subject?.immutability()) {
+                Immutability.SNAPSHOT -> snapshots += alias
+                Immutability.FROZEN -> frozen += alias
+                else -> {}
+            }
         }
     }
 
@@ -412,6 +458,80 @@ internal class RenderRules(
         if (expression.reflectionTargetSymbol == null) expression.acceptChildrenVoid(this) else expression.boundValues.forEach { it.acceptVoid(this) }
     }
 
+    // Immutability
+
+    private fun checkMutation(
+        call: IrCall,
+        callee: IrSimpleFunction,
+        isRender: Boolean,
+    ) {
+        val receiver = call.receiver() ?: return
+        if (!callee.isSetter && !callee.isMutatorOf(receiver.type) || lint.isRef(receiver.type)) return
+        val what = if (callee.isSetter) "`${callee.correspondingPropertySymbol!!.owner.name}` is assigned" else "`${callee.name}()` is called"
+        val message = when (receiver.immutability()) {
+            Immutability.SNAPSHOT -> "$what on props or state, which are snapshots of one render and must not be modified. Create a new value: pass it to the state setter, or to the child as a prop."
+            Immutability.FROZEN -> "$what on a value React considers immutable. Hook arguments, values returned from hooks and values already passed to a hook or to an element must not be modified during render: copy the value, or change it before it is passed.".takeIf { isRender }
+            Immutability.NONE -> null
+        }
+        if (message != null) report(LintRule.REACT_IMMUTABILITY, call, message)
+    }
+
+    /** A member or stdlib extension that changes the collection or array it is called on. */
+    private fun IrSimpleFunction.isMutatorOf(type: IrType): Boolean {
+        val isMutable = type.isSubtypeOfClass(builtIns.mutableCollectionClass) || type.isSubtypeOfClass(builtIns.mutableMapClass)
+        return name.asString() in (if (isMutable) COLLECTION_MUTATORS else if (type.isArray() || type.isPrimitiveArray()) ARRAY_MUTATORS else return false)
+    }
+
+    /**
+     * Whether this expression is one of the values that must not be modified, or is read from one: through
+     * properties, destructuring, casts and `!!`, which all lead into the same object.
+     */
+    private fun IrExpression.immutability(): Immutability =
+        when (this) {
+            is IrGetValue -> if (symbol in snapshots) Immutability.SNAPSHOT else if (symbol in frozen) Immutability.FROZEN else Immutability.NONE
+            is IrTypeOperatorCall -> argument.immutability()
+            is IrContainerExpression -> (statements.lastOrNull() as? IrExpression)?.immutability() ?: Immutability.NONE
+            is IrWhen -> branches.maxOf { it.result.immutability() }
+            is IrCall -> {
+                val callee = symbol.owner
+                val local = delegated[symbol]
+                val receiver = receiver()
+                when {
+                    // The value of `var state by useState()`.
+                    local != null -> if (local.delegate?.type?.let(lint::isState) == true) Immutability.SNAPSHOT else Immutability.NONE
+                    callee.name.isHookName() || callee.isUse() -> Immutability.FROZEN
+                    symbol == builtIns.checkNotNullSymbol -> arguments[0]?.immutability() ?: Immutability.NONE
+                    receiver == null -> Immutability.NONE
+                    // The first of `val (state, setState) = useState()`.
+                    callee.name.asString() == "component1" && lint.isState(receiver.type) -> Immutability.SNAPSHOT
+                    callee.isGetter || callee.isOperator && COMPONENT_N.matches(callee.name.asString()) -> receiver.immutability()
+                    else -> Immutability.NONE
+                }
+            }
+            else -> Immutability.NONE
+        }
+
+    /**
+     * "Values are immutable after being passed to JSX", and to a hook: a local given to either is frozen from here
+     * on. To an element it is given as a prop, assigned in the element's body, or as an argument of a builder call.
+     */
+    private fun freezePassedValues(
+        call: IrCall,
+        callee: IrSimpleFunction,
+        isHook: Boolean,
+    ) {
+        val isProp = callee.isSetter && call.receiver()?.type?.isSubtypeOfClass(symbols.propsClass) == true
+        if (!isHook && !isProp && !call.isOnBuilder(callee)) return
+        callee.parameters.forEachIndexed { index, parameter ->
+            val argument = call.arguments[index].takeIf { parameter.kind == IrParameterKind.Regular } ?: return@forEachIndexed
+            val values = if (argument is IrVararg) argument.elements.filterIsInstance<IrExpression>() else listOf(argument)
+            for (value in values) {
+                val local = (value.unwrapCasts() as? IrGetValue)?.symbol ?: continue
+                if (local.owner is IrVariable && local !in snapshots) frozen += local
+            }
+        }
+    }
+
     private fun report(
         rule: LintRule,
         at: IrElement,
@@ -487,11 +607,24 @@ private class Site {
         root?.let(predicate) == true
 }
 
+/** How firmly React holds a value, weakest first. */
+private enum class Immutability {
+    NONE,
+
+    /** Not to be modified while rendering: it was given to React or came from it. */
+    FROZEN,
+
+    /** Never to be modified: props and state. */
+    SNAPSHOT,
+}
+
 private const val EVERY_RENDER = "A component or hook must call the same hooks in the same order on every render"
 
 private fun notAHookMessage(name: String): String =
     "`$name` is not a hook, but React Compiler takes every name that starts with `use` for one. Rename it."
 
+/** The operators a destructuring declaration calls. */
+private val COMPONENT_N = Regex("component\\d+")
 private val USE = FqName("react.use")
 
 /** Functions that call their lambda exactly once, where it is written. */
@@ -511,6 +644,13 @@ private val EFFECT_HOOKS = setOf("useEffect", "useLayoutEffect", "useInsertionEf
 /** The hooks whose result never changes, and those that return a pair whose second part never does. */
 private val HOOKS_RETURNING_STABLE_VALUES = setOf("useRef", "useEffectEvent")
 private val HOOKS_RETURNING_SETTERS = setOf("useState", "useReducer", "useActionState", "useTransition")
+
+private val COLLECTION_MUTATORS = setOf(
+    "add", "addAll", "addFirst", "addLast", "clear", "fill", "getOrPut", "minusAssign", "plusAssign", "put", "putAll",
+    "remove", "removeAll", "removeAt", "removeFirst", "removeFirstOrNull", "removeLast", "removeLastOrNull", "replaceAll",
+    "retainAll", "reverse", "set", "shuffle", "sort", "sortBy", "sortByDescending", "sortDescending", "sortWith",
+)
+private val ARRAY_MUTATORS = setOf("fill", "reverse", "set", "shuffle", "sort", "sortBy", "sortByDescending", "sortDescending", "sortWith")
 
 private fun IrSimpleFunction.isUse(): Boolean =
     name.asString() == "use" && fqNameWhenAvailable == USE

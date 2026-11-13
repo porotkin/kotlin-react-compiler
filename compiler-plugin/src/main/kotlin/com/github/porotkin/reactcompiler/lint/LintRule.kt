@@ -28,6 +28,9 @@ internal enum class LintRule(val default: LintLevel) {
 
     /** `refs`: a ref is not read or written while rendering. */
     REACT_REFS(LintLevel.ERROR),
+
+    /** `immutability`: props, state, hook arguments, hook results and values passed to elements are not modified. */
+    REACT_IMMUTABILITY(LintLevel.ERROR),
 }
 
 /** The level of every rule: its default, unless another one is set for it. */
