@@ -34,6 +34,9 @@ internal enum class LintRule(val default: LintLevel) {
 
     /** `set-state-in-effect`: an effect does not set state as soon as it runs. */
     REACT_SET_STATE_IN_EFFECT(LintLevel.ERROR),
+
+    /** `use-memo`: `useMemo` computes a value, and the value is used. */
+    REACT_USE_MEMO(LintLevel.ERROR),
 }
 
 /** The level of every rule: its default, unless another one is set for it. */

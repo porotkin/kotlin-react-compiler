@@ -29,6 +29,7 @@ import org.jetbrains.kotlin.ir.expressions.IrReturn
 import org.jetbrains.kotlin.ir.expressions.IrRichFunctionReference
 import org.jetbrains.kotlin.ir.expressions.IrRichPropertyReference
 import org.jetbrains.kotlin.ir.expressions.IrTry
+import org.jetbrains.kotlin.ir.expressions.IrTypeOperator
 import org.jetbrains.kotlin.ir.expressions.IrTypeOperatorCall
 import org.jetbrains.kotlin.ir.expressions.IrVararg
 import org.jetbrains.kotlin.ir.expressions.IrWhen
@@ -38,6 +39,7 @@ import org.jetbrains.kotlin.ir.symbols.IrValueSymbol
 import org.jetbrains.kotlin.ir.types.IrType
 import org.jetbrains.kotlin.ir.types.classOrNull
 import org.jetbrains.kotlin.ir.types.isArray
+import org.jetbrains.kotlin.ir.types.isUnit
 import org.jetbrains.kotlin.ir.util.fqNameWhenAvailable
 import org.jetbrains.kotlin.ir.util.isEffectivelyExternal
 import org.jetbrains.kotlin.ir.util.isFunction
@@ -64,7 +66,8 @@ import org.jetbrains.kotlin.name.FqName
  * - [LintRule.REACT_REFS]: a ref is not read or written while rendering;
  * - [LintRule.REACT_IMMUTABILITY]: props and state are never modified, and neither are, during render, hook
  *   arguments, hook results, and values already passed to a hook or to an element;
- * - [LintRule.REACT_SET_STATE_IN_EFFECT]: an effect does not set state as soon as it runs.
+ * - [LintRule.REACT_SET_STATE_IN_EFFECT]: an effect does not set state as soon as it runs;
+ * - [LintRule.REACT_USE_MEMO]: `useMemo` returns a value, and the value is used.
  *
  * The checks follow the code as it is written: a value is known to be props, state or a hook result only through
  * the `val`s it is assigned to, and a function called from a component is not looked into. React Compiler, which
@@ -289,6 +292,9 @@ internal class RenderRules(
         if (isHook || callee.isUse()) checkHookCall(expression, callee)
         if (isHook) dependencies.check(expression, callee, localScope())
         checkHookNamedProperty(expression, callee)
+        if (expression.isUseMemo() && expression.type.isUnit()) {
+            report(LintRule.REACT_USE_MEMO, expression, "The callback of `useMemo` returns nothing. `useMemo` is for computing a value: run side effects in `useEffect` or in an event handler.")
+        }
         val site = site()
         // Whether the code is held to the rules of render: it is in a component or hook that has not opted out of them.
         val isChecked = reactFunction()?.let { it.renders && !it.optsOut } == true
@@ -572,6 +578,16 @@ internal class RenderRules(
                 if (local.owner is IrVariable && local !in snapshots) frozen += local
             }
         }
+    }
+
+    // useMemo
+
+    override fun visitTypeOperator(expression: IrTypeOperatorCall) {
+        val discarded = expression.argument.takeIf { expression.operator == IrTypeOperator.IMPLICIT_COERCION_TO_UNIT } as? IrCall
+        if (discarded != null && discarded.isUseMemo() && !discarded.type.isUnit()) {
+            report(LintRule.REACT_USE_MEMO, discarded, "The value `useMemo` computes is not used. `useMemo` is for computing a value: run side effects in `useEffect` or in an event handler.")
+        }
+        expression.acceptChildrenVoid(this)
     }
 
     private fun report(
