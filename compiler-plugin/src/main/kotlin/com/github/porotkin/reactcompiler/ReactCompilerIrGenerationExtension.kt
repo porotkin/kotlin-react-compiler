@@ -5,6 +5,7 @@ import com.github.porotkin.reactcompiler.hook.HookCallLowering
 import com.github.porotkin.reactcompiler.hook.HookDirectiveLowering
 import com.github.porotkin.reactcompiler.lint.LintConfig
 import com.github.porotkin.reactcompiler.lint.LintReporter
+import com.github.porotkin.reactcompiler.lint.LintSymbols
 import com.github.porotkin.reactcompiler.lint.ReactLint
 import org.jetbrains.kotlin.backend.common.extensions.IrGenerationExtension
 import org.jetbrains.kotlin.backend.common.extensions.IrPluginContext
@@ -26,10 +27,11 @@ class ReactCompilerIrGenerationExtension : IrGenerationExtension {
     ) {
         if (!pluginContext.platform.isJs()) return
         val file = moduleFragment.files.firstOrNull() ?: return
-        val symbols = ReactSymbols.resolve(pluginContext.finderForSource(file)) ?: return
+        val finder = pluginContext.finderForSource(file)
+        val symbols = ReactSymbols.resolve(finder) ?: return
         // Every lint rule at its default level.
         val reporter = LintReporter(pluginContext, LintConfig(emptyMap()))
-        ReactLint(symbols, reporter).check(moduleFragment)
+        ReactLint(symbols, LintSymbols(finder), reporter).check(moduleFragment)
         listOf(
             HookCallLowering(pluginContext, symbols),
             HookDirectiveLowering(pluginContext, symbols),

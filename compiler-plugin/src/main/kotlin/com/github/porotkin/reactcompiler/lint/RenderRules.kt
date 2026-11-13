@@ -5,19 +5,27 @@ import com.github.porotkin.reactcompiler.isHookName
 import org.jetbrains.kotlin.ir.IrElement
 import org.jetbrains.kotlin.ir.declarations.IrClass
 import org.jetbrains.kotlin.ir.declarations.IrConstructor
+import org.jetbrains.kotlin.ir.declarations.IrDeclarationParent
 import org.jetbrains.kotlin.ir.declarations.IrDeclarationWithName
 import org.jetbrains.kotlin.ir.declarations.IrFile
 import org.jetbrains.kotlin.ir.declarations.IrFunction
+import org.jetbrains.kotlin.ir.declarations.IrLocalDelegatedProperty
 import org.jetbrains.kotlin.ir.declarations.IrParameterKind
 import org.jetbrains.kotlin.ir.declarations.IrSimpleFunction
 import org.jetbrains.kotlin.ir.declarations.IrValueParameter
+import org.jetbrains.kotlin.ir.declarations.IrVariable
 import org.jetbrains.kotlin.ir.expressions.IrCall
+import org.jetbrains.kotlin.ir.expressions.IrConst
 import org.jetbrains.kotlin.ir.expressions.IrFunctionExpression
+import org.jetbrains.kotlin.ir.expressions.IrGetValue
 import org.jetbrains.kotlin.ir.expressions.IrLoop
 import org.jetbrains.kotlin.ir.expressions.IrReturn
 import org.jetbrains.kotlin.ir.expressions.IrRichFunctionReference
 import org.jetbrains.kotlin.ir.expressions.IrTry
 import org.jetbrains.kotlin.ir.expressions.IrWhen
+import org.jetbrains.kotlin.ir.symbols.IrSimpleFunctionSymbol
+import org.jetbrains.kotlin.ir.symbols.IrSymbol
+import org.jetbrains.kotlin.ir.symbols.IrValueSymbol
 import org.jetbrains.kotlin.ir.types.classOrNull
 import org.jetbrains.kotlin.ir.util.fqNameWhenAvailable
 import org.jetbrains.kotlin.ir.util.isFunction
@@ -34,17 +42,30 @@ import org.jetbrains.kotlin.name.FqName
  * function with a stack of [Frame]s telling whose render the code runs in, if any, and whether it runs on every
  * render. The rules, each named after the one of React's linter that it follows:
  *
- * - [LintRule.REACT_RULES_OF_HOOKS]: a hook call sits at the top level of a component or of a hook.
+ * - [LintRule.REACT_RULES_OF_HOOKS]: a hook call sits at the top level of a component or of a hook;
+ * - [LintRule.REACT_EXHAUSTIVE_DEPS]: the dependencies of a hook are complete, see [ExhaustiveDeps].
  */
 internal class RenderRules(
     private val file: IrFile,
     private val symbols: ReactSymbols,
+    private val lint: LintSymbols,
     private val reporter: LintReporter,
 ) : IrVisitorVoid() {
     private val frames = mutableListOf(Frame(Scope.OTHER, null))
 
     /** The scope of each lambda passed to the call being visited, decided by what the callee does with it. */
     private val lambdaScopes = mutableMapOf<IrFunctionExpression, Scope>()
+
+    /** The accessors of `by` locals, which a read or an assignment of the local calls. */
+    private val delegated = mutableMapOf<IrSimpleFunctionSymbol, IrLocalDelegatedProperty>()
+
+    /** The hook each local was returned by, which tells the setter of `val (state, setState) = useState()`. */
+    private val hookResults = mutableMapOf<IrValueSymbol, String>()
+
+    /** The locals whose value is the same on every render, see [ExhaustiveDeps]. */
+    private val stable = mutableSetOf<IrSymbol>()
+
+    private val dependencies = ExhaustiveDeps(file, lint, reporter, delegated, stable)
 
     fun check() {
         file.acceptChildrenVoid(this)
@@ -77,6 +98,25 @@ internal class RenderRules(
         val function = expression.function
         val scope = lambdaScopes.remove(expression) ?: if (function.isRenderLambda()) Scope.COMPONENT else Scope.CALLBACK
         inFrame(Frame(scope, function)) { function.acceptChildrenVoid(this) }
+    }
+
+    override fun visitLocalDelegatedProperty(declaration: IrLocalDelegatedProperty) {
+        delegated[declaration.getter.symbol] = declaration
+        declaration.setter?.let { delegated[it.symbol] = declaration }
+        // The accessors only forward to the delegate: what matters is where the local is read and assigned.
+        declaration.delegate?.acceptVoid(this)
+    }
+
+    override fun visitVariable(declaration: IrVariable) {
+        declaration.acceptChildrenVoid(this)
+        val value = declaration.initializer ?: return
+        val call = value as? IrCall
+        val callee = call?.symbol?.owner?.name?.asString()
+        if (call != null && call.symbol.owner.name.isHookName()) hookResults[declaration.symbol] = callee!!
+        if (declaration.isVar) return
+        // As React's linter has it: a constant, a ref, an effect event, and the second of what these hooks return.
+        val isSetter = callee == "component2" && (call.receiver() as? IrGetValue)?.symbol?.let(hookResults::get) in HOOKS_RETURNING_SETTERS
+        if (value is IrConst || callee in HOOKS_RETURNING_STABLE_VALUES || isSetter) stable += declaration.symbol
     }
 
     private inline fun inFrame(
@@ -145,12 +185,23 @@ internal class RenderRules(
     private fun reactFunction(): Frame? =
         frames.lastOrNull { it.scope == Scope.COMPONENT || it.scope == Scope.HOOK }
 
+    /** The functions whose locals the code being visited can read as values of its own component or hook. */
+    private fun localScope(): Set<IrDeclarationParent> =
+        buildSet {
+            for (frame in frames.asReversed()) {
+                frame.function?.let(::add)
+                if (!frame.scope.isBlock) break
+            }
+        }
+
     // Calls
 
     override fun visitCall(expression: IrCall) {
         val callee = expression.symbol.owner
+        val isHook = callee.name.isHookName()
         classifyLambdas(expression, callee)
-        if (callee.name.isHookName() || callee.isUse()) checkHookCall(expression, callee)
+        if (isHook || callee.isUse()) checkHookCall(expression, callee)
+        if (isHook) dependencies.check(expression, callee, localScope())
         expression.acceptChildrenVoid(this)
     }
 
@@ -280,6 +331,9 @@ private enum class Scope {
     CALLBACK,
     ;
 
+    /** Whether the code is part of the function it is written in, not a function of its own. */
+    val isBlock: Boolean get() = this == BLOCK || this == IN_PLACE
+
     val isCallback: Boolean get() = this == CALLBACK || this == EFFECT
 }
 
@@ -327,6 +381,10 @@ private val RUN_ONCE_FUNCTIONS = SCOPE_FUNCTIONS + setOf(
 
 private val EFFECT_HOOKS = setOf("useEffect", "useLayoutEffect", "useInsertionEffect")
     .flatMapTo(mutableSetOf()) { listOf(FqName("react.$it"), FqName("react.${it}Once")) }
+
+/** The hooks whose result never changes, and those that return a pair whose second part never does. */
+private val HOOKS_RETURNING_STABLE_VALUES = setOf("useRef", "useEffectEvent")
+private val HOOKS_RETURNING_SETTERS = setOf("useState", "useReducer", "useActionState", "useTransition")
 
 private fun IrSimpleFunction.isUse(): Boolean =
     name.asString() == "use" && fqNameWhenAvailable == USE

@@ -19,6 +19,9 @@ internal enum class LintLevel {
 internal enum class LintRule(val default: LintLevel) {
     /** `rules-of-hooks`: hooks are called at the top level of a component or of a hook, and nowhere else. */
     REACT_RULES_OF_HOOKS(LintLevel.ERROR),
+
+    /** `exhaustive-deps`: the dependencies of a hook name every value its callback reads. */
+    REACT_EXHAUSTIVE_DEPS(LintLevel.WARNING),
 }
 
 /** The level of every rule: its default, unless another one is set for it. */

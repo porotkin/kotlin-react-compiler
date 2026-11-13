@@ -9,11 +9,12 @@ import org.jetbrains.kotlin.ir.declarations.IrModuleFragment
  */
 internal class ReactLint(
     private val symbols: ReactSymbols,
+    private val lintSymbols: LintSymbols,
     private val reporter: LintReporter,
 ) {
     fun check(module: IrModuleFragment) {
         for (file in module.files) {
-            RenderRules(file, symbols, reporter).check()
+            RenderRules(file, symbols, lintSymbols, reporter).check()
         }
     }
 }
