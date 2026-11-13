@@ -15,7 +15,7 @@ Apply the plugin to a Kotlin/JS project:
 ```kotlin
 plugins {
     kotlin("multiplatform") version "2.4.21"
-    id("io.github.porotkin.kotlin-react-compiler") version "1.0.4"
+    id("io.github.porotkin.kotlin-react-compiler") version "1.0.5"
 }
 ```
 
