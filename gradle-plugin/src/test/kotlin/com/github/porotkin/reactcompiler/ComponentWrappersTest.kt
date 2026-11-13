@@ -132,6 +132,7 @@ class ComponentWrappersTest : PluginTest() {
 
                 var escaped = 0
 
+                @Suppress("REACT_GLOBALS")
                 fun escape(builder: ChildrenBuilder) {
                     escaped++
                 }

@@ -13,6 +13,7 @@ import org.jetbrains.kotlin.ir.declarations.IrDeclarationWithName
 import org.jetbrains.kotlin.ir.declarations.IrFile
 import org.jetbrains.kotlin.ir.declarations.IrFunction
 import org.jetbrains.kotlin.ir.declarations.IrLocalDelegatedProperty
+import org.jetbrains.kotlin.ir.declarations.IrPackageFragment
 import org.jetbrains.kotlin.ir.declarations.IrParameterKind
 import org.jetbrains.kotlin.ir.declarations.IrSimpleFunction
 import org.jetbrains.kotlin.ir.declarations.IrValueParameter
@@ -22,12 +23,14 @@ import org.jetbrains.kotlin.ir.expressions.IrConst
 import org.jetbrains.kotlin.ir.expressions.IrContainerExpression
 import org.jetbrains.kotlin.ir.expressions.IrExpression
 import org.jetbrains.kotlin.ir.expressions.IrFunctionExpression
+import org.jetbrains.kotlin.ir.expressions.IrGetObjectValue
 import org.jetbrains.kotlin.ir.expressions.IrGetValue
 import org.jetbrains.kotlin.ir.expressions.IrLoop
 import org.jetbrains.kotlin.ir.expressions.IrPropertyReference
 import org.jetbrains.kotlin.ir.expressions.IrReturn
 import org.jetbrains.kotlin.ir.expressions.IrRichFunctionReference
 import org.jetbrains.kotlin.ir.expressions.IrRichPropertyReference
+import org.jetbrains.kotlin.ir.expressions.IrSetField
 import org.jetbrains.kotlin.ir.expressions.IrTry
 import org.jetbrains.kotlin.ir.expressions.IrTypeOperator
 import org.jetbrains.kotlin.ir.expressions.IrTypeOperatorCall
@@ -64,7 +67,8 @@ import org.jetbrains.kotlin.name.FqName
  * - [LintRule.REACT_EXHAUSTIVE_DEPS]: the dependencies of a hook are complete, see [ExhaustiveDeps];
  * - [LintRule.REACT_HOOKS_AS_VALUES]: nothing but a hook is named like one, where React Compiler reads the name;
  * - while a component or hook renders, it does not access a ref ([LintRule.REACT_REFS]), set state every time
- *   ([LintRule.REACT_SET_STATE_IN_RENDER]), or wrap a child element in `try` ([LintRule.REACT_ERROR_BOUNDARIES]);
+ *   ([LintRule.REACT_SET_STATE_IN_RENDER]), assign or modify a global ([LintRule.REACT_GLOBALS]), or wrap a child
+ *   element in `try` ([LintRule.REACT_ERROR_BOUNDARIES]);
  * - [LintRule.REACT_IMMUTABILITY]: props and state are never modified, and neither are, during render, hook
  *   arguments, hook results, and values already passed to a hook or to an element;
  * - [LintRule.REACT_SET_STATE_IN_EFFECT]: an effect does not set state as soon as it runs;
@@ -310,7 +314,10 @@ internal class RenderRules(
         if (isRender) {
             checkRefAccess(expression, callee)
             checkSetStateInRender(expression, site)
-            if (!site.memo) checkElementInTry(expression, callee, site)
+            if (!site.memo) {
+                checkGlobalMutation(expression, callee)
+                checkElementInTry(expression, callee, site)
+            }
         }
 
         expression.acceptChildrenVoid(this)
@@ -600,6 +607,42 @@ internal class RenderRules(
         }
     }
 
+    // Globals
+
+    private fun checkGlobalMutation(
+        call: IrCall,
+        callee: IrSimpleFunction,
+    ) {
+        val receiver = call.receiver()
+        if (callee.isSetter) {
+            val property = callee.correspondingPropertySymbol!!.owner.name
+            when {
+                receiver?.isGlobal() == true -> report(LintRule.REACT_GLOBALS, call, globalMessage("`$property` is assigned on a value"))
+                receiver == null && callee.correspondingPropertySymbol!!.owner.parent is IrPackageFragment -> report(LintRule.REACT_GLOBALS, call, globalMessage("`$property` is assigned, which is"))
+            }
+        } else if (receiver != null && callee.isMutatorOf(receiver.type) && receiver.isGlobal()) {
+            report(LintRule.REACT_GLOBALS, call, globalMessage("`${callee.name}()` is called on a value"))
+        }
+    }
+
+    /** An `object`, a top-level property, or a property read from one: what exists apart from any render. */
+    private fun IrExpression.isGlobal(): Boolean =
+        when (this) {
+            is IrGetObjectValue -> true
+            is IrTypeOperatorCall -> argument.isGlobal()
+            is IrCall -> symbol.owner.isGetter && (receiver()?.isGlobal() ?: (symbol.owner.correspondingPropertySymbol!!.owner.parent is IrPackageFragment))
+            else -> false
+        }
+
+    override fun visitSetField(expression: IrSetField) {
+        val site = site()
+        val isGlobal = expression.receiver.let { it == null || it is IrGetObjectValue }
+        if (isGlobal && !site.memo && site.rendersIn { it.renders && !it.optsOut }) {
+            report(LintRule.REACT_GLOBALS, expression, globalMessage("`${expression.symbol.owner.name}` is assigned, which is"))
+        }
+        expression.acceptChildrenVoid(this)
+    }
+
     // Error boundaries
 
     private fun checkElementInTry(
@@ -720,6 +763,9 @@ private const val EVERY_RENDER = "A component or hook must call the same hooks i
 
 private fun notAHookMessage(name: String): String =
     "`$name` is not a hook, but React Compiler takes every name that starts with `use` for one. Rename it."
+
+private fun globalMessage(what: String): String =
+    "$what declared outside the component or hook, during render. Rendering must not change what it did not create: move the change to an effect or an event handler."
 
 /** The operators a destructuring declaration calls. */
 private val COMPONENT_N = Regex("component\\d+")

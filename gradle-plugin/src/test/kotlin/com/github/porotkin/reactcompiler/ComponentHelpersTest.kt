@@ -136,6 +136,7 @@ class ComponentHelpersTest : PluginTest() {
 
                 var escaped = false
 
+                @Suppress("REACT_GLOBALS")
                 fun escape(builder: ChildrenBuilder) {
                     escaped = true
                 }
