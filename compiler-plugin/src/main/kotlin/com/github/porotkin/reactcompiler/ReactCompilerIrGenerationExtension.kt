@@ -39,7 +39,7 @@ class ReactCompilerIrGenerationExtension internal constructor(
         listOf(
             HookCallLowering(pluginContext, symbols),
             HookDirectiveLowering(pluginContext, symbols),
-            ComponentLowering(pluginContext, symbols),
+            ComponentLowering(pluginContext, symbols, reporter),
         ).forEach { it.lower(moduleFragment) }
     }
 }

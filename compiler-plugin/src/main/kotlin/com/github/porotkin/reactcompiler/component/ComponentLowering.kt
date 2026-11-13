@@ -2,6 +2,9 @@ package com.github.porotkin.reactcompiler.component
 
 import com.github.porotkin.reactcompiler.ReactLowering
 import com.github.porotkin.reactcompiler.ReactSymbols
+import com.github.porotkin.reactcompiler.lint.LintReporter
+import com.github.porotkin.reactcompiler.lint.LintRule
+import com.github.porotkin.reactcompiler.optsOutOfMemo
 import com.github.porotkin.reactcompiler.reportInfo
 import org.jetbrains.kotlin.backend.common.extensions.IrPluginContext
 import org.jetbrains.kotlin.ir.IrFileEntry
@@ -27,6 +30,7 @@ import org.jetbrains.kotlin.ir.visitors.transformChildrenVoid
 internal class ComponentLowering(
     context: IrPluginContext,
     symbols: ReactSymbols,
+    private val lint: LintReporter,
 ) : ReactLowering(context, symbols) {
     private val wrappers = ComponentWrappers(context, symbols)
     private lateinit var fileEntry: IrFileEntry
@@ -71,7 +75,13 @@ internal class ComponentLowering(
         val items = helpers.analyzer.analyze(fn, builder.symbol)
         if (items == null) {
             val problem = "The plugin cannot lower this code: its component stays as it is, and React Compiler does not memoize it"
-            context.reportInfo(currentFile, helpers.analyzer.unsupported ?: lambda, problem)
+            val at = helpers.analyzer.unsupported ?: lambda
+            // A component that opts out of React Compiler loses nothing by staying as it is.
+            if (lint.isOn(LintRule.REACT_UNSUPPORTED_SYNTAX) && !fn.optsOutOfMemo(symbols)) {
+                lint.report(LintRule.REACT_UNSUPPORTED_SYNTAX, currentFile, at, "$problem. Rewrite it, or opt the component out with js(\"\\\"use no memo\\\"\").")
+            } else {
+                context.reportInfo(currentFile, at, problem)
+            }
             return false
         }
         rewrite(fn, builder, items)

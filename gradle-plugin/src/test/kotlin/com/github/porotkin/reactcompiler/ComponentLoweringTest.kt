@@ -119,30 +119,29 @@ class ComponentLoweringTest : PluginTest() {
     }
 
     @Test
-    fun `notes the statement that keeps a component from being lowered, in an --info build only`() {
-        val project = TestProject(dir).apply {
-            module(
-                "app",
-                """
-                package app
+    fun `warns about the statement that keeps a component from being lowered, or notes it in an --info build`() {
+        val source = """
+            package app
 
-                import react.*
+            import react.*
 
-                val div: ElementType<FragmentProps> = "div".unsafeCast<ElementType<FragmentProps>>()
+            val div: ElementType<FragmentProps> = "div".unsafeCast<ElementType<FragmentProps>>()
 
-                fun render(builder: ChildrenBuilder) {}
+            fun render(builder: ChildrenBuilder) {}
 
-                val Escaping: FC<Props> = FC { _ ->
-                    div {
-                        render(this)
-                    }
+            val Escaping: FC<Props> = FC { _ ->
+                div {
+                    render(this)
                 }
-                """,
-            )
-        }
+            }
+        """
         val note = "App.kt:11:9 The plugin cannot lower this code: its component stays as it is, and React Compiler does not memoize it"
 
-        assertTrue(note !in project.run(":app:compileKotlinJs").output, "Expected no note in a plain build")
+        val warned = TestProject(dir).apply { module("app", source) }.run(":app:compileKotlinJs").output
+        assertTrue("w: " in warned && note in warned && "[REACT_UNSUPPORTED_SYNTAX]" in warned, "Expected the escaping builder warned about in:\n$warned")
+
+        val project = TestProject(dir).apply { module("app", source, configuration = """reactCompiler { lint { off("REACT_UNSUPPORTED_SYNTAX") } }""") }
+        assertTrue(note !in project.run(":app:compileKotlinJs", "--rerun-tasks").output, "Expected no note in a plain build with the rule off")
         val output = project.run(":app:compileKotlinJs", "--info", "--rerun-tasks").output
         assertTrue(note in output, "Expected the escaping builder noted in:\n$output")
     }

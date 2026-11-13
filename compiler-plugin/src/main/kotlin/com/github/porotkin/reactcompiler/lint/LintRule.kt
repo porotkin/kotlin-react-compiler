@@ -59,6 +59,9 @@ internal enum class LintRule(val default: LintLevel) {
     /** `use-memo`: `useMemo` computes a value, and the value is used. */
     REACT_USE_MEMO(LintLevel.ERROR),
 
+    /** `unsupported-syntax`: a component is written so that the plugin can lower it and React Compiler memoize it. */
+    REACT_UNSUPPORTED_SYNTAX(LintLevel.WARNING),
+
     /**
      * Not a Rule of React: a file that exports a component exports nothing else, which Fast Refresh needs. It is
      * `only-export-components` of `eslint-plugin-react-refresh`.

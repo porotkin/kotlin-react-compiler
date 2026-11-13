@@ -69,6 +69,31 @@ class FileLintTest : LintTest() {
     }
 
     @Test
+    fun `warns about a component the plugin cannot lower`() {
+        val result = assertLint(
+            """
+            private fun fill(builder: ChildrenBuilder) {}
+
+            val Escapes: FC<Props> = FC {
+                fill(this) // ? REACT_UNSUPPORTED_SYNTAX
+            }
+
+            private val OptedOut: FC<Props> = FC {
+                js("\"use no memo\"")
+                fill(this)
+            }
+
+            @Suppress("REACT_UNSUPPORTED_SYNTAX")
+            private val Suppressed: FC<Props> = FC {
+                fill(this)
+            }
+            """,
+        )
+
+        assertTrue("The plugin cannot lower this code" in result.output, result.output)
+    }
+
+    @Test
     fun `sets rule levels from the build script`() {
         val source = """
             private val div: ElementType<FragmentProps> = "div".unsafeCast<ElementType<FragmentProps>>()
