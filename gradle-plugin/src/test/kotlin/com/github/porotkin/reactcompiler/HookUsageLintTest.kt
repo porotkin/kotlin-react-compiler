@@ -91,4 +91,64 @@ class HookUsageLintTest : LintTest() {
         assertTrue("Hook `useMemo` spreads an array into its dependencies" in result.output, result.output)
         assertTrue("Hook `useLogged` has a missing dependency: `anchor`." in result.output, result.output)
     }
+
+    @Test
+    fun `reports effects that set state at once, useMemo without a value, and elements in try`() {
+        assertLint(
+            """
+            val div: ElementType<FragmentProps> = "div".unsafeCast<ElementType<FragmentProps>>()
+
+            interface TitleProps : Props {
+                var title: String
+            }
+
+            val Title: FC<TitleProps> = FC { props ->
+                div { +props.title }
+            }
+
+            suspend fun load(): String = "loaded"
+
+            val Effects: FC<TitleProps> = FC { props ->
+                val ref = useRef<String>()
+                val (title, setTitle) = useState("")
+                var loading by useState(false)
+
+                useEffect(props.title) {
+                    setTitle(props.title) // ! REACT_SET_STATE_IN_EFFECT
+                }
+                useLayoutEffect(props.title) {
+                    loading = true // ! REACT_SET_STATE_IN_EFFECT
+                    val loaded = load()
+                    setTitle(loaded)
+                    loading = false
+                }
+                // The value of a ref is what an effect is there to read.
+                useEffect(props.title) {
+                    val measured = ref.current
+                    setTitle(measured ?: "")
+                }
+                // A callback the effect registers runs later.
+                useEffect(props.title) {
+                    val onChange = { value: String -> setTitle(value) }
+                    onChange(props.title)
+                }
+                div { +"${'$'}title ${'$'}loading" }
+            }
+
+            val Memoizes: FC<TitleProps> = FC { props ->
+                val nothing = useMemo(props.title) { println(props.title) } // ! REACT_USE_MEMO
+                useMemo(props.title) { props.title.length } // ! REACT_USE_MEMO
+                div { +"${'$'}nothing" }
+            }
+
+            val Guarded: FC<TitleProps> = FC { props ->
+                try {
+                    Title { title = props.title } // ! REACT_ERROR_BOUNDARIES
+                } catch (e: Throwable) {
+                    div { +"failed" }
+                }
+            }
+            """,
+        )
+    }
 }

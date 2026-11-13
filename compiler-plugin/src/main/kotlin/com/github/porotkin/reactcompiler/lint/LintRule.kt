@@ -35,6 +35,9 @@ internal enum class LintRule(val default: LintLevel) {
     /** `set-state-in-effect`: an effect does not set state as soon as it runs. */
     REACT_SET_STATE_IN_EFFECT(LintLevel.ERROR),
 
+    /** `error-boundaries`: `try`/`catch` is not used to catch what a child component throws. */
+    REACT_ERROR_BOUNDARIES(LintLevel.ERROR),
+
     /** `use-memo`: `useMemo` computes a value, and the value is used. */
     REACT_USE_MEMO(LintLevel.ERROR),
 }

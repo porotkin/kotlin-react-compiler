@@ -63,7 +63,8 @@ import org.jetbrains.kotlin.name.FqName
  * - [LintRule.REACT_RULES_OF_HOOKS]: a hook call sits at the top level of a component or of a hook;
  * - [LintRule.REACT_EXHAUSTIVE_DEPS]: the dependencies of a hook are complete, see [ExhaustiveDeps];
  * - [LintRule.REACT_HOOKS_AS_VALUES]: nothing but a hook is named like one, where React Compiler reads the name;
- * - [LintRule.REACT_REFS]: a ref is not read or written while rendering;
+ * - while a component or hook renders, it does not access a ref ([LintRule.REACT_REFS]) or wrap a child element in
+ *   `try` ([LintRule.REACT_ERROR_BOUNDARIES]);
  * - [LintRule.REACT_IMMUTABILITY]: props and state are never modified, and neither are, during render, hook
  *   arguments, hook results, and values already passed to a hook or to an element;
  * - [LintRule.REACT_SET_STATE_IN_EFFECT]: an effect does not set state as soon as it runs;
@@ -236,9 +237,14 @@ internal class RenderRules(
     }
 
     override fun visitTry(aTry: IrTry) {
-        frames.last().tries++
-        aTry.acceptChildrenVoid(this)
-        frames.last().tries--
+        val frame = frames.last()
+        frame.tries++
+        frame.tryBodies++
+        aTry.tryResult.acceptVoid(this)
+        frame.tryBodies--
+        aTry.catches.forEach { it.acceptVoid(this) }
+        aTry.finallyExpression?.acceptVoid(this)
+        frame.tries--
     }
 
     override fun visitReturn(expression: IrReturn) {
@@ -254,6 +260,7 @@ internal class RenderRules(
             site.conditional = site.conditional || frame.branches > 0
             site.repeated = site.repeated || frame.loops > 0
             site.guarded = site.guarded || frame.tries > 0
+            site.tried = site.tried || frame.tryBodies > 0
             site.afterReturn = site.afterReturn || frame.returned
             when (frame.scope) {
                 Scope.BLOCK -> continue
@@ -300,7 +307,10 @@ internal class RenderRules(
         val isChecked = reactFunction()?.let { it.renders && !it.optsOut } == true
         val isRender = isChecked && site.root != null
         if (isChecked) checkMutation(expression, callee, isRender && !site.memo)
-        if (isRender) checkRefAccess(expression, callee)
+        if (isRender) {
+            checkRefAccess(expression, callee)
+            if (!site.memo) checkElementInTry(expression, callee, site)
+        }
 
         expression.acceptChildrenVoid(this)
 
@@ -580,6 +590,19 @@ internal class RenderRules(
         }
     }
 
+    // Error boundaries
+
+    private fun checkElementInTry(
+        call: IrCall,
+        callee: IrSimpleFunction,
+        site: Site,
+    ) {
+        val createsElement = site.tried && callee.name.asString() in ELEMENT_FUNCTIONS && call.isOnBuilder(callee)
+        if (createsElement) {
+            report(LintRule.REACT_ERROR_BOUNDARIES, call, "An element is created inside `try`, but its component renders later: what it throws is not caught here. Catch the errors of child components with an error boundary.")
+        }
+    }
+
     // useMemo
 
     override fun visitTypeOperator(expression: IrTypeOperatorCall) {
@@ -643,6 +666,7 @@ private class Frame(
     var branches = 0
     var loops = 0
     var tries = 0
+    var tryBodies = 0
     var returned = false
 
     /** Whether the function has called a suspend function: what follows runs later. */
@@ -660,6 +684,9 @@ private class Site {
 
     /** Inside `try`, `catch` or `finally`. */
     var guarded = false
+
+    /** Inside the body of a `try`. */
+    var tried = false
     var afterReturn = false
     var inPlace = false
     var memo = false
@@ -701,6 +728,9 @@ private val RUN_ONCE_FUNCTIONS = SCOPE_FUNCTIONS + setOf(
 
 private val EFFECT_HOOKS = setOf("useEffect", "useLayoutEffect", "useInsertionEffect")
     .flatMapTo(mutableSetOf()) { listOf(FqName("react.$it"), FqName("react.${it}Once")) }
+
+/** What adds a child to a builder: `type { }` and `child(type, props)`. */
+private val ELEMENT_FUNCTIONS = setOf("invoke", "child")
 
 /** The hooks whose result never changes, and those that return a pair whose second part never does. */
 private val HOOKS_RETURNING_STABLE_VALUES = setOf("useRef", "useEffectEvent")
