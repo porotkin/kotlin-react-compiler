@@ -32,6 +32,9 @@ internal enum class LintRule(val default: LintLevel) {
     /** `immutability`: props, state, hook arguments, hook results and values passed to elements are not modified. */
     REACT_IMMUTABILITY(LintLevel.ERROR),
 
+    /** `set-state-in-render`: state is not set unconditionally while rendering. */
+    REACT_SET_STATE_IN_RENDER(LintLevel.ERROR),
+
     /** `set-state-in-effect`: an effect does not set state as soon as it runs. */
     REACT_SET_STATE_IN_EFFECT(LintLevel.ERROR),
 

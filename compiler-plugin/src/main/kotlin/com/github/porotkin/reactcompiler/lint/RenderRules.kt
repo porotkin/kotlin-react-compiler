@@ -63,8 +63,8 @@ import org.jetbrains.kotlin.name.FqName
  * - [LintRule.REACT_RULES_OF_HOOKS]: a hook call sits at the top level of a component or of a hook;
  * - [LintRule.REACT_EXHAUSTIVE_DEPS]: the dependencies of a hook are complete, see [ExhaustiveDeps];
  * - [LintRule.REACT_HOOKS_AS_VALUES]: nothing but a hook is named like one, where React Compiler reads the name;
- * - while a component or hook renders, it does not access a ref ([LintRule.REACT_REFS]) or wrap a child element in
- *   `try` ([LintRule.REACT_ERROR_BOUNDARIES]);
+ * - while a component or hook renders, it does not access a ref ([LintRule.REACT_REFS]), set state every time
+ *   ([LintRule.REACT_SET_STATE_IN_RENDER]), or wrap a child element in `try` ([LintRule.REACT_ERROR_BOUNDARIES]);
  * - [LintRule.REACT_IMMUTABILITY]: props and state are never modified, and neither are, during render, hook
  *   arguments, hook results, and values already passed to a hook or to an element;
  * - [LintRule.REACT_SET_STATE_IN_EFFECT]: an effect does not set state as soon as it runs;
@@ -309,6 +309,7 @@ internal class RenderRules(
         if (isChecked) checkMutation(expression, callee, isRender && !site.memo)
         if (isRender) {
             checkRefAccess(expression, callee)
+            checkSetStateInRender(expression, site)
             if (!site.memo) checkElementInTry(expression, callee, site)
         }
 
@@ -503,6 +504,15 @@ internal class RenderRules(
         } else {
             symbol.owner.name.asString() == "invoke" && receiver()?.type?.let(lint::isStateSetter) == true
         }
+    }
+
+    private fun checkSetStateInRender(
+        call: IrCall,
+        site: Site,
+    ) {
+        // Setting state on some renders only is how state is derived from props.
+        if (site.conditional || site.repeated || site.afterReturn || site.inPlace || !call.setsState()) return
+        report(LintRule.REACT_SET_STATE_IN_RENDER, call, "State is set on every render, which renders again without end. Set state in an event handler, or compute the value during render.")
     }
 
     /**
