@@ -11,16 +11,17 @@ import org.junit.jupiter.api.Assertions.assertTrue
  */
 abstract class LintTest : PluginTest() {
     /**
-     * Compiles [declarations] in an `app` module importing `react.*`, with [fileAnnotations] at the top of the file,
-     * and checks that the linter reports exactly what the source expects.
+     * Compiles [declarations] in an `app` module importing `react.*`, with [configuration] in its build script and
+     * [fileAnnotations] at the top of the file, and checks that the linter reports exactly what the source expects.
      */
     protected fun assertLint(
         declarations: String,
+        configuration: String = "",
         fileAnnotations: String = "",
     ): BuildResult {
         val source = listOf(fileAnnotations, "package app\n\nimport react.*\n\n${declarations.trimIndent()}\n")
             .filter { it.isNotEmpty() }.joinToString("\n")
-        val result = TestProject(dir).apply { module("app", source) }
+        val result = TestProject(dir).apply { module("app", source, configuration = configuration) }
             .runUnchecked(":app:compileDevelopmentExecutableKotlinJs")
         val expected = source.lines().flatMapIndexed { index, line ->
             val marker = MARKER.find(line) ?: return@flatMapIndexed emptyList()

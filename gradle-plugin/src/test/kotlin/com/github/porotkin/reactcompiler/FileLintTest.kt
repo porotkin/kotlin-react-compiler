@@ -69,6 +69,44 @@ class FileLintTest : LintTest() {
     }
 
     @Test
+    fun `sets rule levels from the build script`() {
+        val source = """
+            private val div: ElementType<FragmentProps> = "div".unsafeCast<ElementType<FragmentProps>>()
+
+            private fun useValue(): Int = 1
+
+            val Conditional: FC<Props> = FC {
+                if (div.toString().isEmpty()) useValue() // %HOOKS%
+            }
+
+            fun title(): String = "title" // %EXPORTS%
+        """
+
+        fun lint(
+            hooks: String,
+            exports: String,
+            configuration: String,
+        ) = assertLint(source.replace("// %HOOKS%", hooks).replace("// %EXPORTS%", exports), configuration)
+
+        // The compiler prints no warnings for a compilation that has errors.
+        lint("// ! REACT_RULES_OF_HOOKS", "", "")
+        lint("", "// ? REACT_ONLY_EXPORT_COMPONENTS", """reactCompiler { lint { off("REACT_RULES_OF_HOOKS") } }""")
+        lint("", "// ! REACT_ONLY_EXPORT_COMPONENTS", """reactCompiler { lint { warning("REACT_RULES_OF_HOOKS"); error("REACT_ONLY_EXPORT_COMPONENTS") } }""")
+        lint(
+            "// ? REACT_RULES_OF_HOOKS",
+            "",
+            """reactCompiler { lint { all(com.github.porotkin.reactcompiler.ReactLintLevel.WARNING); off("REACT_ONLY_EXPORT_COMPONENTS") } }""",
+        )
+        val disabled = lint("", "", "reactCompiler { lint { enabled = false } }")
+        assertEquals(TaskOutcome.SUCCESS, disabled.task(":app:compileKotlinJs")?.outcome)
+
+        val unknown = TestProject(dir)
+            .apply { module("app", "package app", configuration = """reactCompiler { lint { off("REACT_NO_SUCH_RULE") } }""") }
+            .runAndFail(":app:compileKotlinJs")
+        assertTrue("Invalid value of the lint option: REACT_NO_SUCH_RULE:off" in unknown.output, unknown.output)
+    }
+
+    @Test
     fun `suppresses a rule on a statement, a declaration and a file`() {
         assertLint(
             """

@@ -27,6 +27,7 @@ internal class TestProject(
         source: String,
         vararg dependsOn: String,
         applyPlugin: Boolean = true,
+        configuration: String = "",
     ) {
         modules += name
         val annotations = if (applyPlugin) emptyList() else listOf("implementation(\"$ANNOTATIONS_MODULE:$pluginVersion\")")
@@ -36,6 +37,7 @@ internal class TestProject(
             "$name/build.gradle.kts",
             """
             ${pluginsBlock}kotlin { sourceSets { jsMain { dependencies { $dependencies } } } }
+            $configuration
             """,
         )
         write("$name/src/jsMain/kotlin/${name.replaceFirstChar(Char::uppercaseChar)}.kt", source)

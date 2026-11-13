@@ -5,6 +5,13 @@ import java.util.*
 
 internal const val PLUGIN_ID = "io.github.porotkin.kotlin-react-compiler"
 
+internal const val EXTENSION_NAME = "reactCompiler"
+
+/** The compiler plugin option that sets lint rule levels, see `LintConfig` there for its values. */
+internal const val LINT_OPTION = "lint"
+internal const val LINT_OFF = "off"
+internal const val ALL_RULES = "all"
+
 private val PROPERTIES: Properties =
     Properties().apply {
         ReactCompilerPlugin::class.java.getResourceAsStream("/kotlin-react-compiler.properties")!!.use(::load)
