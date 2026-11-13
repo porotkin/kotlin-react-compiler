@@ -260,4 +260,33 @@ class RenderLintTest : LintTest() {
             """,
         )
     }
+
+    @Test
+    fun `reports impure calls during render`() {
+        assertLint(
+            """
+            import kotlin.js.Date
+            import kotlin.random.Random
+
+            val div: ElementType<FragmentProps> = "div".unsafeCast<ElementType<FragmentProps>>()
+
+            val Impure: FC<Props> = FC {
+                val id = Random.nextInt() // ! REACT_PURITY
+                val now = Date() // ! REACT_PURITY
+                val stamp = Date.now() // ! REACT_PURITY
+                val pick = listOf(1, 2).random() // ! REACT_PURITY
+                div { +"${'$'}id ${'$'}now ${'$'}stamp ${'$'}pick" }
+            }
+
+            val Kept: FC<Props> = FC {
+                val (id) = useState { Random.nextInt() }
+                val stamp = useMemo { Date.now() }
+                val epoch = Date(0)
+                useEffect { Random.nextInt() }
+                val onClick = { Date() }
+                div { +"${'$'}id ${'$'}stamp ${'$'}epoch ${'$'}onClick" }
+            }
+            """,
+        )
+    }
 }

@@ -20,6 +20,7 @@ import org.jetbrains.kotlin.ir.declarations.IrValueParameter
 import org.jetbrains.kotlin.ir.declarations.IrVariable
 import org.jetbrains.kotlin.ir.expressions.IrCall
 import org.jetbrains.kotlin.ir.expressions.IrConst
+import org.jetbrains.kotlin.ir.expressions.IrConstructorCall
 import org.jetbrains.kotlin.ir.expressions.IrContainerExpression
 import org.jetbrains.kotlin.ir.expressions.IrExpression
 import org.jetbrains.kotlin.ir.expressions.IrFunctionExpression
@@ -54,6 +55,8 @@ import org.jetbrains.kotlin.ir.util.isPrimitiveArray
 import org.jetbrains.kotlin.ir.util.isSetter
 import org.jetbrains.kotlin.ir.util.isSubtypeOfClass
 import org.jetbrains.kotlin.ir.util.isSuspendFunction
+import org.jetbrains.kotlin.ir.util.parentAsClass
+import org.jetbrains.kotlin.ir.util.parentClassOrNull
 import org.jetbrains.kotlin.ir.visitors.IrVisitorVoid
 import org.jetbrains.kotlin.ir.visitors.acceptChildrenVoid
 import org.jetbrains.kotlin.ir.visitors.acceptVoid
@@ -69,7 +72,8 @@ import org.jetbrains.kotlin.name.FqName
  * - [LintRule.REACT_HOOKS_AS_VALUES]: nothing but a hook is named like one, where React Compiler reads the name;
  * - while a component or hook renders, it does not access a ref ([LintRule.REACT_REFS]), set state every time
  *   ([LintRule.REACT_SET_STATE_IN_RENDER]), assign or modify a global ([LintRule.REACT_GLOBALS]), create a component
- *   ([LintRule.REACT_STATIC_COMPONENTS]), or wrap a child element in `try` ([LintRule.REACT_ERROR_BOUNDARIES]);
+ *   ([LintRule.REACT_STATIC_COMPONENTS]), call a function known to be impure ([LintRule.REACT_PURITY]), or wrap a
+ *   child element in `try` ([LintRule.REACT_ERROR_BOUNDARIES]);
  * - [LintRule.REACT_IMMUTABILITY]: props and state are never modified, and neither are, during render, hook
  *   arguments, hook results, and values already passed to a hook or to an element;
  * - [LintRule.REACT_SET_STATE_IN_EFFECT]: an effect does not set state as soon as it runs;
@@ -319,6 +323,7 @@ internal class RenderRules(
                 checkGlobalMutation(expression, callee)
                 checkComponentCreation(expression, callee)
                 checkElementInTry(expression, callee, site)
+                if (callee.isImpure()) report(LintRule.REACT_PURITY, expression, impureMessage("${callee.name}()"))
             }
         }
 
@@ -328,6 +333,16 @@ internal class RenderRules(
         if (isChecked) checkSetStateInEffect(expression)
         if (isRender && !site.memo) freezePassedValues(expression, callee, isHook)
         if (callee.isSuspend) enclosingFunction().suspended = true
+    }
+
+    override fun visitConstructorCall(expression: IrConstructorCall) {
+        val site = site()
+        val type = expression.symbol.owner.parentAsClass
+        val isNow = type.fqNameWhenAvailable in DATE_CLASSES && expression.arguments.isEmpty()
+        if (isNow && !site.memo && site.rendersIn { it.renders && !it.optsOut }) {
+            report(LintRule.REACT_PURITY, expression, impureMessage("${type.name}()"))
+        }
+        expression.acceptChildrenVoid(this)
     }
 
     /**
@@ -680,6 +695,18 @@ internal class RenderRules(
         expression.acceptChildrenVoid(this)
     }
 
+    // Purity
+
+    private fun IrSimpleFunction.isImpure(): Boolean {
+        val owner = parentClassOrNull
+        val name = name.asString()
+        return when {
+            owner == null -> fqNameWhenAvailable in IMPURE_FUNCTIONS
+            owner.isA(RANDOM) -> true
+            else -> IMPURE_MEMBERS.any { (type, member) -> member == name && owner.isA(type) }
+        }
+    }
+
     private fun report(
         rule: LintRule,
         at: IrElement,
@@ -781,10 +808,15 @@ private fun notAHookMessage(name: String): String =
 private fun globalMessage(what: String): String =
     "$what declared outside the component or hook, during render. Rendering must not change what it did not create: move the change to an effect or an event handler."
 
+private fun impureMessage(call: String): String =
+    "`$call` returns something else on every call, so the result of rendering changes with it. Call it in an effect or an event handler, or keep its result in state: `useState { ... }`."
+
 /** The operators a destructuring declaration calls. */
 private val COMPONENT_N = Regex("component\\d+")
 private val COMPONENT_WRAPPER = FqName("com.github.porotkin.reactcompiler.ComponentWrapper")
 private val USE = FqName("react.use")
+private val RANDOM = FqName("kotlin.random.Random")
+private val DATE_CLASSES = setOf(FqName("kotlin.js.Date"), FqName("js.date.Date"))
 
 /** Functions that call their lambda exactly once, where it is written. */
 private val SCOPE_FUNCTIONS = setOf("apply", "also", "let", "run", "with", "takeIf", "takeUnless").mapTo(mutableSetOf()) { FqName("kotlin.$it") }
@@ -816,6 +848,26 @@ private val COLLECTION_MUTATORS = setOf(
 )
 private val ARRAY_MUTATORS = setOf("fill", "reverse", "set", "shuffle", "sort", "sortBy", "sortByDescending", "sortDescending", "sortWith")
 
+private val IMPURE_FUNCTIONS = setOf(
+    "kotlin.collections.random",
+    "kotlin.collections.randomOrNull",
+    "kotlin.collections.shuffled",
+    "kotlin.ranges.random",
+    "kotlin.ranges.randomOrNull",
+).mapTo(mutableSetOf(), ::FqName)
+
+/** Members that read the clock or a random source, by the class that declares them. */
+private val IMPURE_MEMBERS = listOf(
+    "kotlin.js.Date.Companion" to "now",
+    "js.date.Date.Companion" to "now",
+    "kotlin.time.Clock" to "now",
+    "kotlinx.datetime.Clock" to "now",
+    "kotlin.time.TimeSource" to "markNow",
+    "kotlin.uuid.Uuid.Companion" to "random",
+    "web.performance.Performance" to "now",
+    "web.crypto.Crypto" to "randomUUID",
+).map { (type, member) -> FqName(type) to member }
+
 private fun IrSimpleFunction.isUse(): Boolean =
     name.asString() == "use" && fqNameWhenAvailable == USE
 
@@ -829,3 +881,6 @@ private fun IrSimpleFunction.hasComponentName(): Boolean =
  */
 private fun IrValueParameter.isInlined(): Boolean =
     !isNoinline && !isCrossinline && (type.isFunction() || type.isSuspendFunction()) && !type.isFunctionMarker()
+
+private fun IrClass.isA(type: FqName): Boolean =
+    fqNameWhenAvailable == type || superTypes.any { it.classOrNull?.owner?.isA(type) == true }
