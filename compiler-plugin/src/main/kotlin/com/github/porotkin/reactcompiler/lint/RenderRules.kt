@@ -44,6 +44,7 @@ import org.jetbrains.kotlin.ir.types.classOrNull
 import org.jetbrains.kotlin.ir.types.isArray
 import org.jetbrains.kotlin.ir.types.isUnit
 import org.jetbrains.kotlin.ir.util.fqNameWhenAvailable
+import org.jetbrains.kotlin.ir.util.hasAnnotation
 import org.jetbrains.kotlin.ir.util.isEffectivelyExternal
 import org.jetbrains.kotlin.ir.util.isFunction
 import org.jetbrains.kotlin.ir.util.isFunctionMarker
@@ -67,8 +68,8 @@ import org.jetbrains.kotlin.name.FqName
  * - [LintRule.REACT_EXHAUSTIVE_DEPS]: the dependencies of a hook are complete, see [ExhaustiveDeps];
  * - [LintRule.REACT_HOOKS_AS_VALUES]: nothing but a hook is named like one, where React Compiler reads the name;
  * - while a component or hook renders, it does not access a ref ([LintRule.REACT_REFS]), set state every time
- *   ([LintRule.REACT_SET_STATE_IN_RENDER]), assign or modify a global ([LintRule.REACT_GLOBALS]), or wrap a child
- *   element in `try` ([LintRule.REACT_ERROR_BOUNDARIES]);
+ *   ([LintRule.REACT_SET_STATE_IN_RENDER]), assign or modify a global ([LintRule.REACT_GLOBALS]), create a component
+ *   ([LintRule.REACT_STATIC_COMPONENTS]), or wrap a child element in `try` ([LintRule.REACT_ERROR_BOUNDARIES]);
  * - [LintRule.REACT_IMMUTABILITY]: props and state are never modified, and neither are, during render, hook
  *   arguments, hook results, and values already passed to a hook or to an element;
  * - [LintRule.REACT_SET_STATE_IN_EFFECT]: an effect does not set state as soon as it runs;
@@ -316,6 +317,7 @@ internal class RenderRules(
             checkSetStateInRender(expression, site)
             if (!site.memo) {
                 checkGlobalMutation(expression, callee)
+                checkComponentCreation(expression, callee)
                 checkElementInTry(expression, callee, site)
             }
         }
@@ -643,6 +645,18 @@ internal class RenderRules(
         expression.acceptChildrenVoid(this)
     }
 
+    // Static components
+
+    private fun checkComponentCreation(
+        call: IrCall,
+        callee: IrSimpleFunction,
+    ) {
+        val creates = call.symbol in symbols.componentFactories || callee.hasAnnotation(COMPONENT_WRAPPER) || callee.fqNameWhenAvailable in COMPONENT_FACTORIES
+        if (creates) {
+            report(LintRule.REACT_STATIC_COMPONENTS, call, "A component is created during render: every render makes a new one, and React resets its state. Declare the component at the top level of the file.")
+        }
+    }
+
     // Error boundaries
 
     private fun checkElementInTry(
@@ -769,6 +783,7 @@ private fun globalMessage(what: String): String =
 
 /** The operators a destructuring declaration calls. */
 private val COMPONENT_N = Regex("component\\d+")
+private val COMPONENT_WRAPPER = FqName("com.github.porotkin.reactcompiler.ComponentWrapper")
 private val USE = FqName("react.use")
 
 /** Functions that call their lambda exactly once, where it is written. */
@@ -784,6 +799,8 @@ private val RUN_ONCE_FUNCTIONS = SCOPE_FUNCTIONS + setOf(
 
 private val EFFECT_HOOKS = setOf("useEffect", "useLayoutEffect", "useInsertionEffect")
     .flatMapTo(mutableSetOf()) { listOf(FqName("react.$it"), FqName("react.${it}Once")) }
+
+private val COMPONENT_FACTORIES = setOf("react.memo", "react.forwardRef", "react.lazy").mapTo(mutableSetOf(), ::FqName)
 
 /** What adds a child to a builder: `type { }` and `child(type, props)`. */
 private val ELEMENT_FUNCTIONS = setOf("invoke", "child")

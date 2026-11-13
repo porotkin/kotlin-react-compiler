@@ -41,6 +41,9 @@ internal enum class LintRule(val default: LintLevel) {
     /** `set-state-in-effect`: an effect does not set state as soon as it runs. */
     REACT_SET_STATE_IN_EFFECT(LintLevel.ERROR),
 
+    /** `static-components`: a component is not created while another one renders. */
+    REACT_STATIC_COMPONENTS(LintLevel.ERROR),
+
     /** `error-boundaries`: `try`/`catch` is not used to catch what a child component throws. */
     REACT_ERROR_BOUNDARIES(LintLevel.ERROR),
 

@@ -185,4 +185,79 @@ class RenderLintTest : LintTest() {
             """,
         )
     }
+
+    @Test
+    fun `reports state set on every render, globals assigned and components created during render`() {
+        assertLint(
+            """
+            val div: ElementType<FragmentProps> = "div".unsafeCast<ElementType<FragmentProps>>()
+
+            interface TitleProps : Props {
+                var title: String
+            }
+
+            var renderCount = 0
+
+            val events = mutableListOf<String>()
+
+            object Registry {
+                var last: String? = null
+                val seen = mutableSetOf<String>()
+            }
+
+            val SetsState: FC<TitleProps> = FC {
+                val (count, setCount) = useState(0)
+                setCount(1) // ! REACT_SET_STATE_IN_RENDER
+                var name by useState("")
+                name = "always" // ! REACT_SET_STATE_IN_RENDER
+                val doubled = useMemo(count) {
+                    setCount(count * 2) // ! REACT_SET_STATE_IN_RENDER
+                    count * 2
+                }
+                div { +"${'$'}name ${'$'}doubled" }
+            }
+
+            val DerivesState: FC<TitleProps> = FC { props ->
+                val (title, setTitle) = useState(props.title)
+                if (title != props.title) {
+                    setTitle(props.title)
+                }
+                useEffect(title) { setTitle("effect") } // ! REACT_SET_STATE_IN_EFFECT
+                val onClick = { setTitle("click") }
+                div { +"${'$'}title ${'$'}onClick" }
+            }
+
+            val AssignsGlobals: FC<TitleProps> = FC { props ->
+                renderCount++ // ! REACT_GLOBALS
+                Registry.last = props.title // ! REACT_GLOBALS
+                events.add(props.title) // ! REACT_GLOBALS
+                Registry.seen += props.title // ! REACT_GLOBALS
+                useEffect {
+                    renderCount = 0
+                    events.clear()
+                }
+                div { +"${'$'}renderCount" }
+            }
+
+            fun useRenderCount(): Int {
+                renderCount += 1 // ! REACT_GLOBALS
+                return renderCount
+            }
+
+            val Title: FC<TitleProps> = FC { props ->
+                div { +props.title }
+            }
+
+            val CreatesComponents: FC<TitleProps> = FC { props ->
+                val Inner = FC<TitleProps> { div { +"inner" } } // ! REACT_STATIC_COMPONENTS
+                val Memoized = memo(Title) // ! REACT_STATIC_COMPONENTS
+                Inner { title = props.title }
+                Memoized { title = props.title }
+            }
+
+            fun createTitle(prefix: String): FC<TitleProps> =
+                FC { props -> div { +"${'$'}prefix ${'$'}{props.title}" } }
+            """,
+        )
+    }
 }
