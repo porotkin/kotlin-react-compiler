@@ -51,6 +51,16 @@ internal class TestProject(
             .build()
     }
 
+    /** Runs [tasks] whether or not the build then fails. */
+    fun runUnchecked(vararg tasks: String): BuildResult {
+        writeRootBuild()
+
+        return GradleRunner.create()
+            .withProjectDir(dir)
+            .withArguments(*tasks, "--stacktrace")
+            .run()
+    }
+
     fun runAndFail(vararg tasks: String): BuildResult {
         writeRootBuild()
 
@@ -65,6 +75,7 @@ internal class TestProject(
         write("$STUBS_MODULE/src/jsMain/kotlin/ReactStubs.kt", if (externalProps) REACT_EXTERNAL_STUBS else REACT_STUBS)
         write("$STUBS_MODULE/src/jsMain/kotlin/ReactRawStubs.kt", REACT_RAW_STUBS)
         write("$STUBS_MODULE/src/jsMain/kotlin/ReactJsxStubs.kt", REACT_JSX_STUBS)
+        write("$STUBS_MODULE/src/jsMain/kotlin/ReactHookStubs.kt", REACT_HOOK_STUBS)
         write(
             "settings.gradle.kts",
             """
@@ -341,4 +352,65 @@ private val REACT_JSX_STUBS =
 
     fun <P : Props> jsx(type: ElementType<P>, props: P?, defaultKey: Any?): ReactNode =
         js("({ type: type, props: props, key: (props != null && props.key != null) ? props.key : defaultKey })").unsafeCast<ReactNode>()
+    """.trimIndent() + "\n"
+
+/** The refs, state and effects of kotlin-react, which the lint rules tell by their types. */
+private val REACT_HOOK_STUBS =
+    """
+    package react
+
+    import kotlin.reflect.KProperty
+
+    external interface RefObject<T : Any> {
+        var current: T?
+    }
+
+    fun <T : Any> useRef(initialValue: T? = null): RefObject<T> =
+        js("({ current: initialValue })").unsafeCast<RefObject<T>>()
+
+    class RefValueInstance<T>(private var value: T) {
+        operator fun getValue(thisRef: Nothing?, property: KProperty<*>): T = value
+
+        operator fun setValue(thisRef: Nothing?, property: KProperty<*>, value: T) {
+            this.value = value
+        }
+    }
+
+    fun <T : Any> useRefValue(initialValue: T): RefValueInstance<T> =
+        RefValueInstance(initialValue)
+
+    class StateSetter<T> {
+        operator fun invoke(value: T) {}
+
+        operator fun invoke(transform: (T) -> T) {}
+    }
+
+    class StateInstance<T>(private val value: T) {
+        operator fun component1(): T = value
+
+        operator fun component2(): StateSetter<T> = StateSetter()
+
+        operator fun getValue(thisRef: Nothing?, property: KProperty<*>): T = value
+
+        operator fun setValue(thisRef: Nothing?, property: KProperty<*>, value: T) {}
+    }
+
+    fun <T> useState(initialValue: T): StateInstance<T> =
+        StateInstance(initialValue)
+
+    fun <T> useState(initializer: () -> T): StateInstance<T> =
+        StateInstance(initializer())
+
+    fun useEffect(effect: suspend () -> Unit) {}
+
+    fun useEffect(vararg dependencies: Any?, effect: suspend () -> Unit) {}
+
+    fun useEffectOnce(effect: suspend () -> Unit) {}
+
+    fun useLayoutEffect(vararg dependencies: Any?, effect: suspend () -> Unit) {}
+
+    external interface Context<T>
+
+    fun <T> use(context: Context<T>): T =
+        js("null").unsafeCast<T>()
     """.trimIndent() + "\n"

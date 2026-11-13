@@ -1,0 +1,30 @@
+package com.github.porotkin.reactcompiler.lint
+
+/** How a broken [LintRule] is reported. */
+internal enum class LintLevel {
+    ERROR,
+    WARNING,
+    OFF,
+}
+
+/**
+ * A rule the linter checks. Its name is the name of the diagnostic: `@Suppress("<name>")` silences it on a
+ * declaration.
+ *
+ * The rules are the [Rules of React](https://react.dev/reference/rules) as React's own linter enforces them: each
+ * one carries the name of a rule of
+ * [`eslint-plugin-react-hooks`](https://react.dev/reference/eslint-plugin-react-hooks), or of the Rule of React it
+ * checks where that plugin has no rule for it, and the level the plugin's `recommended` preset gives it.
+ */
+internal enum class LintRule(val default: LintLevel) {
+    /** `rules-of-hooks`: hooks are called at the top level of a component or of a hook, and nowhere else. */
+    REACT_RULES_OF_HOOKS(LintLevel.ERROR),
+}
+
+/** The level of every rule: its default, unless another one is set for it. */
+internal class LintConfig(
+    private val levels: Map<LintRule, LintLevel>,
+) {
+    fun level(rule: LintRule): LintLevel =
+        levels[rule] ?: rule.default
+}
