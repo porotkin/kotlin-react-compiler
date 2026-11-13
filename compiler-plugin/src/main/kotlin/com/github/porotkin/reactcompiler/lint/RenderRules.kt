@@ -2,6 +2,8 @@ package com.github.porotkin.reactcompiler.lint
 
 import com.github.porotkin.reactcompiler.ReactSymbols
 import com.github.porotkin.reactcompiler.isHookName
+import com.github.porotkin.reactcompiler.optsOutOfMemo
+import org.jetbrains.kotlin.ir.IrBuiltIns
 import org.jetbrains.kotlin.ir.IrElement
 import org.jetbrains.kotlin.ir.declarations.IrClass
 import org.jetbrains.kotlin.ir.declarations.IrConstructor
@@ -16,11 +18,14 @@ import org.jetbrains.kotlin.ir.declarations.IrValueParameter
 import org.jetbrains.kotlin.ir.declarations.IrVariable
 import org.jetbrains.kotlin.ir.expressions.IrCall
 import org.jetbrains.kotlin.ir.expressions.IrConst
+import org.jetbrains.kotlin.ir.expressions.IrExpression
 import org.jetbrains.kotlin.ir.expressions.IrFunctionExpression
 import org.jetbrains.kotlin.ir.expressions.IrGetValue
 import org.jetbrains.kotlin.ir.expressions.IrLoop
+import org.jetbrains.kotlin.ir.expressions.IrPropertyReference
 import org.jetbrains.kotlin.ir.expressions.IrReturn
 import org.jetbrains.kotlin.ir.expressions.IrRichFunctionReference
+import org.jetbrains.kotlin.ir.expressions.IrRichPropertyReference
 import org.jetbrains.kotlin.ir.expressions.IrTry
 import org.jetbrains.kotlin.ir.expressions.IrWhen
 import org.jetbrains.kotlin.ir.symbols.IrSimpleFunctionSymbol
@@ -33,6 +38,7 @@ import org.jetbrains.kotlin.ir.util.isFunction
 import org.jetbrains.kotlin.ir.util.isFunctionMarker
 import org.jetbrains.kotlin.ir.util.isFunctionTypeOrSubtype
 import org.jetbrains.kotlin.ir.util.isGetter
+import org.jetbrains.kotlin.ir.util.isSetter
 import org.jetbrains.kotlin.ir.util.isSubtypeOfClass
 import org.jetbrains.kotlin.ir.util.isSuspendFunction
 import org.jetbrains.kotlin.ir.visitors.IrVisitorVoid
@@ -47,13 +53,18 @@ import org.jetbrains.kotlin.name.FqName
  *
  * - [LintRule.REACT_RULES_OF_HOOKS]: a hook call sits at the top level of a component or of a hook;
  * - [LintRule.REACT_EXHAUSTIVE_DEPS]: the dependencies of a hook are complete, see [ExhaustiveDeps];
- * - [LintRule.REACT_HOOKS_AS_VALUES]: nothing but a hook is named like one, where React Compiler reads the name.
+ * - [LintRule.REACT_HOOKS_AS_VALUES]: nothing but a hook is named like one, where React Compiler reads the name;
+ * - [LintRule.REACT_REFS]: a ref is not read or written while rendering.
+ *
+ * A function that opts out of React Compiler with `"use no memo"` is still held to the Rules of Hooks and to its
+ * dependencies, which React itself needs; the rest it is trusted with.
  */
 internal class RenderRules(
     private val file: IrFile,
     private val symbols: ReactSymbols,
     private val lint: LintSymbols,
     private val reporter: LintReporter,
+    private val builtIns: IrBuiltIns,
 ) : IrVisitorVoid() {
     private val frames = mutableListOf(Frame(Scope.OTHER, null))
 
@@ -68,6 +79,10 @@ internal class RenderRules(
 
     /** The locals whose value is the same on every render, see [ExhaustiveDeps]. */
     private val stable = mutableSetOf<IrSymbol>()
+
+    /** Refs inside `if (ref.current == null) { ... }`, the one place render may initialize a ref. */
+    private val initializedRefs = mutableListOf<IrValueSymbol>()
+    private val initializationChecks = mutableSetOf<IrCall>()
 
     private val reportedNames = mutableSetOf<IrValueSymbol>()
     private val dependencies = ExhaustiveDeps(file, lint, reporter, delegated, stable)
@@ -88,7 +103,15 @@ internal class RenderRules(
             declaration.buildsChildren() || declaration.hasComponentName() -> Scope.COMPONENT
             else -> Scope.OTHER
         }
-        inFrame(Frame(scope, declaration)) { declaration.acceptChildrenVoid(this) }
+        // A capitalized function is a component by its name only, so it is held to the rules of render only if it takes props.
+        val renders = when (scope) {
+            Scope.HOOK -> true
+            Scope.COMPONENT -> declaration.buildsChildren() || declaration.parameters.any { it.type.isSubtypeOfClass(symbols.propsClass) }
+            else -> false
+        }
+        inFrame(Frame(scope, declaration, renders, declaration.optsOutOfMemo(symbols))) {
+            declaration.acceptChildrenVoid(this)
+        }
     }
 
     override fun visitConstructor(declaration: IrConstructor) {
@@ -102,7 +125,9 @@ internal class RenderRules(
     override fun visitFunctionExpression(expression: IrFunctionExpression) {
         val function = expression.function
         val scope = lambdaScopes.remove(expression) ?: if (function.isRenderLambda()) Scope.COMPONENT else Scope.CALLBACK
-        inFrame(Frame(scope, function)) { function.acceptChildrenVoid(this) }
+        inFrame(Frame(scope, function, scope == Scope.COMPONENT, function.optsOutOfMemo(symbols))) {
+            function.acceptChildrenVoid(this)
+        }
     }
 
     override fun visitLocalDelegatedProperty(declaration: IrLocalDelegatedProperty) {
@@ -137,10 +162,24 @@ internal class RenderRules(
 
     override fun visitWhen(expression: IrWhen) {
         expression.branches.forEachIndexed { index, branch ->
+            val initialized = branch.condition.refInitializationCheck()
             // The first condition is the only part of a `when` that always runs.
             if (index == 0) branch.condition.acceptVoid(this) else conditionally { branch.condition.acceptVoid(this) }
+            if (initialized != null) initializedRefs += initialized
             conditionally { branch.result.acceptVoid(this) }
+            if (initialized != null) initializedRefs.removeLast()
         }
+    }
+
+    /** The ref of `ref.current == null`, whose read is part of initializing the ref. */
+    private fun IrExpression.refInitializationCheck(): IrValueSymbol? {
+        val comparison = this as? IrCall ?: return null
+        if (comparison.symbol != builtIns.eqeqSymbol && comparison.symbol != builtIns.eqeqeqSymbol) return null
+        val read = comparison.arguments[0] as? IrCall ?: return null
+        if ((comparison.arguments[1] as? IrConst)?.value != null || !read.isRefAccess()) return null
+        val ref = (read.receiver() as? IrGetValue)?.symbol ?: return null
+        initializationChecks += read
+        return ref
     }
 
     private inline fun conditionally(block: () -> Unit) {
@@ -208,6 +247,11 @@ internal class RenderRules(
         if (isHook || callee.isUse()) checkHookCall(expression, callee)
         if (isHook) dependencies.check(expression, callee, localScope())
         checkHookNamedProperty(expression, callee)
+        val site = site()
+        // Whether the code is held to the rules of render: it is in a component or hook that has not opted out of them.
+        val isChecked = reactFunction()?.let { it.renders && !it.optsOut } == true
+        val isRender = isChecked && site.root != null
+        if (isRender) checkRefAccess(expression, callee)
         expression.acceptChildrenVoid(this)
     }
 
@@ -315,6 +359,54 @@ internal class RenderRules(
         if (!type.isFunctionTypeOrSubtype()) report(LintRule.REACT_HOOKS_AS_VALUES, call, notAHookMessage("${property.name}"))
     }
 
+    // Refs
+
+    private fun checkRefAccess(
+        call: IrCall,
+        callee: IrSimpleFunction,
+    ) {
+        val local = delegated[call.symbol]
+        val name = when {
+            local != null -> local.name.takeIf { lint.isRefValue(local.delegate?.type ?: return) } ?: return
+            !call.isRefAccess() || call in initializationChecks -> return
+            (call.receiver() as? IrGetValue)?.symbol in initializedRefs -> return
+            else -> "current"
+        }
+        val isWrite = if (local != null) call.symbol == local.setter?.symbol else callee.isSetter
+        val access = if (isWrite) "written" else "read"
+        val advice = "Access refs in effects and event handlers, or keep the value in state"
+        report(LintRule.REACT_REFS, call, "Ref value `$name` is $access during render. $advice.")
+    }
+
+    /** `ref.current`, read or assigned. */
+    private fun IrCall.isRefAccess(): Boolean {
+        val property = symbol.owner.correspondingPropertySymbol?.owner ?: return false
+        return property.name.asString() == "current" && receiver()?.type?.let(lint::isRef) == true
+    }
+
+    override fun visitPropertyReference(expression: IrPropertyReference) {
+        checkRefReference(expression, expression.arguments.firstOrNull())
+        expression.acceptChildrenVoid(this)
+    }
+
+    override fun visitRichPropertyReference(expression: IrRichPropertyReference) {
+        checkRefReference(expression, expression.boundValues.firstOrNull())
+        // The accessors of the reference are generated: only the value it is bound to is code of the file.
+        expression.boundValues.forEach { it.acceptVoid(this) }
+    }
+
+    /** `ref::current` hands the ref itself to whatever takes the reference. */
+    private fun checkRefReference(
+        reference: IrExpression,
+        bound: IrExpression?,
+    ) {
+        if (bound == null || !lint.isRef(bound.type)) return
+        val site = site()
+        if (!site.memo && site.rendersIn { it.renders && !it.optsOut }) {
+            report(LintRule.REACT_REFS, reference, "A property of a ref is referenced during render, which passes the ref on. Use a lambda that reads it: `{ ref.current }`.")
+        }
+    }
+
     override fun visitRichFunctionReference(expression: IrRichFunctionReference) {
         // The function a `::reference` invokes through is generated: only the values it is bound to are code of the file.
         if (expression.reflectionTargetSymbol == null) expression.acceptChildrenVoid(this) else expression.boundValues.forEach { it.acceptVoid(this) }
@@ -366,6 +458,9 @@ private class Frame(
     val scope: Scope,
     /** The function whose body this is, the target of its `return`s. */
     val function: IrFunction?,
+    /** Whether the function is known to run as part of a render, which the rules of render then apply to. */
+    val renders: Boolean = false,
+    val optsOut: Boolean = false,
 ) {
     var branches = 0
     var loops = 0
@@ -387,6 +482,9 @@ private class Site {
     var afterReturn = false
     var inPlace = false
     var memo = false
+
+    inline fun rendersIn(predicate: (Frame) -> Boolean): Boolean =
+        root?.let(predicate) == true
 }
 
 private const val EVERY_RENDER = "A component or hook must call the same hooks in the same order on every render"

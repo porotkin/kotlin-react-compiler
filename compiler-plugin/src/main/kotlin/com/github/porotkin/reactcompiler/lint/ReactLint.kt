@@ -1,6 +1,7 @@
 package com.github.porotkin.reactcompiler.lint
 
 import com.github.porotkin.reactcompiler.ReactSymbols
+import org.jetbrains.kotlin.ir.IrBuiltIns
 import org.jetbrains.kotlin.ir.declarations.IrModuleFragment
 
 /**
@@ -11,10 +12,11 @@ internal class ReactLint(
     private val symbols: ReactSymbols,
     private val lintSymbols: LintSymbols,
     private val reporter: LintReporter,
+    private val builtIns: IrBuiltIns,
 ) {
     fun check(module: IrModuleFragment) {
         for (file in module.files) {
-            RenderRules(file, symbols, lintSymbols, reporter).check()
+            RenderRules(file, symbols, lintSymbols, reporter, builtIns).check()
             if (reporter.isOn(LintRule.REACT_HOOKS_AS_VALUES)) HookDeclarations(file, reporter).check()
         }
     }

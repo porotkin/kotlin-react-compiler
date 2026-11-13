@@ -25,6 +25,9 @@ internal enum class LintRule(val default: LintLevel) {
 
     /** "Never pass around Hooks as regular values": a hook is a top-level function that is only ever called. */
     REACT_HOOKS_AS_VALUES(LintLevel.ERROR),
+
+    /** `refs`: a ref is not read or written while rendering. */
+    REACT_REFS(LintLevel.ERROR),
 }
 
 /** The level of every rule: its default, unless another one is set for it. */

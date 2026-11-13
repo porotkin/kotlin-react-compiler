@@ -11,8 +11,10 @@ import org.jetbrains.kotlin.ir.builders.irCall
 import org.jetbrains.kotlin.ir.builders.irString
 import org.jetbrains.kotlin.ir.declarations.IrDeclarationOrigin
 import org.jetbrains.kotlin.ir.declarations.IrDeclarationParent
+import org.jetbrains.kotlin.ir.declarations.IrFunction
 import org.jetbrains.kotlin.ir.declarations.IrSimpleFunction
 import org.jetbrains.kotlin.ir.declarations.IrVariable
+import org.jetbrains.kotlin.ir.expressions.IrBlockBody
 import org.jetbrains.kotlin.ir.expressions.IrCall
 import org.jetbrains.kotlin.ir.expressions.IrConst
 import org.jetbrains.kotlin.ir.expressions.IrExpression
@@ -80,6 +82,16 @@ internal fun IrBuilderWithScope.irUseMemo(symbols: ReactSymbols): IrCall =
 internal fun IrStatement.isUseMemo(symbols: ReactSymbols): Boolean {
     val call = unwrapCoercion() as? IrCall ?: return false
     return call.symbol == symbols.js && (call.arguments[0] as? IrConst)?.value == USE_MEMO
+}
+
+/** React Compiler's opt-out directive: it leaves a function that starts with it as it is. */
+private const val USE_NO_MEMO = "use no memo"
+
+/** Whether the body starts with `js("\"use no memo\"")`. */
+internal fun IrFunction.optsOutOfMemo(symbols: ReactSymbols): Boolean {
+    val first = (body as? IrBlockBody)?.statements?.firstOrNull()?.unwrapCoercion() as? IrCall ?: return false
+    val directive = (first.arguments.firstOrNull() as? IrConst)?.value as? String ?: return false
+    return first.symbol == symbols.js && directive.trim().trim('"', '\'') == USE_NO_MEMO
 }
 
 internal fun IrStatement.unwrapCoercion(): IrStatement =

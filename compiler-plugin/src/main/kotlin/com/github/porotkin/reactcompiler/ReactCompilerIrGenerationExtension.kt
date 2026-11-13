@@ -31,7 +31,7 @@ class ReactCompilerIrGenerationExtension : IrGenerationExtension {
         val symbols = ReactSymbols.resolve(finder) ?: return
         // Every lint rule at its default level.
         val reporter = LintReporter(pluginContext, LintConfig(emptyMap()))
-        ReactLint(symbols, LintSymbols(finder), reporter).check(moduleFragment)
+        ReactLint(symbols, LintSymbols(finder), reporter, pluginContext.irBuiltIns).check(moduleFragment)
         listOf(
             HookCallLowering(pluginContext, symbols),
             HookDirectiveLowering(pluginContext, symbols),
