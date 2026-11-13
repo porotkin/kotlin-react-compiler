@@ -5,11 +5,17 @@ internal enum class LintLevel {
     ERROR,
     WARNING,
     OFF,
+    ;
+
+    companion object {
+        fun parse(value: String): LintLevel? =
+            entries.firstOrNull { it.name.equals(value, ignoreCase = true) }
+    }
 }
 
 /**
  * A rule the linter checks. Its name is the name of the diagnostic: `@Suppress("<name>")` silences it on a
- * declaration.
+ * declaration, and the `lint` plugin option sets its [LintLevel].
  *
  * The rules are the [Rules of React](https://react.dev/reference/rules) as React's own linter enforces them: each
  * one but the last carries the name of a rule of
@@ -58,12 +64,43 @@ internal enum class LintRule(val default: LintLevel) {
      * `only-export-components` of `eslint-plugin-react-refresh`.
      */
     REACT_ONLY_EXPORT_COMPONENTS(LintLevel.WARNING),
+    ;
+
+    companion object {
+        fun parse(name: String): LintRule? =
+            entries.firstOrNull { it.name == name }
+    }
 }
 
-/** The level of every rule: its default, unless another one is set for it. */
+/** The level of every rule: its default, unless the `lint` plugin option says otherwise. */
 internal class LintConfig(
     private val levels: Map<LintRule, LintLevel>,
 ) {
     fun level(rule: LintRule): LintLevel =
         levels[rule] ?: rule.default
+
+    companion object {
+        /** `off` turns every rule off; `all:<level>` sets every rule, `<RULE>:<level>` one rule. Later options win. */
+        const val OFF = "off"
+        const val ALL = "all"
+
+        /** Reads the values of the `lint` option; a value it cannot read is passed to [onInvalid]. */
+        fun parse(
+            options: List<String>,
+            onInvalid: (String) -> Unit,
+        ): LintConfig {
+            val levels = mutableMapOf<LintRule, LintLevel>()
+            for (option in options) {
+                if (option == OFF) {
+                    LintRule.entries.associateWithTo(levels) { LintLevel.OFF }
+                    continue
+                }
+                val name = option.substringBefore(':')
+                val level = LintLevel.parse(option.substringAfter(':', ""))
+                val rules = if (name == ALL) LintRule.entries else listOfNotNull(LintRule.parse(name))
+                if (level == null || rules.isEmpty()) onInvalid(option) else rules.associateWithTo(levels) { level }
+            }
+            return LintConfig(levels)
+        }
+    }
 }

@@ -20,7 +20,12 @@ import org.jetbrains.kotlin.platform.isJs
  * body is analyzed with its hook calls already in their final form, the same order a single post-order traversal
  * gives.
  */
-class ReactCompilerIrGenerationExtension : IrGenerationExtension {
+class ReactCompilerIrGenerationExtension internal constructor(
+    private val lint: LintConfig,
+) : IrGenerationExtension {
+    /** Every lint rule at its default level. */
+    constructor() : this(LintConfig(emptyMap()))
+
     override fun generate(
         moduleFragment: IrModuleFragment,
         pluginContext: IrPluginContext,
@@ -29,8 +34,7 @@ class ReactCompilerIrGenerationExtension : IrGenerationExtension {
         val file = moduleFragment.files.firstOrNull() ?: return
         val finder = pluginContext.finderForSource(file)
         val symbols = ReactSymbols.resolve(finder) ?: return
-        // Every lint rule at its default level.
-        val reporter = LintReporter(pluginContext, LintConfig(emptyMap()))
+        val reporter = LintReporter(pluginContext, lint)
         ReactLint(symbols, LintSymbols(finder), reporter, pluginContext.irBuiltIns).check(moduleFragment)
         listOf(
             HookCallLowering(pluginContext, symbols),
