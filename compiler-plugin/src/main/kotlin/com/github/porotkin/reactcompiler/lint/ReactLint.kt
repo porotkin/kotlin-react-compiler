@@ -5,8 +5,8 @@ import org.jetbrains.kotlin.ir.IrBuiltIns
 import org.jetbrains.kotlin.ir.declarations.IrModuleFragment
 
 /**
- * Checks the files of a module against the Rules of React: see [LintRule]. It reads the code and reports; the
- * lowerings run after it whatever it finds.
+ * Checks the files of a module against the Rules of React, and against what the plugins need of a file: see
+ * [LintRule]. It reads the code and reports; the lowerings run after it whatever it finds.
  */
 internal class ReactLint(
     private val symbols: ReactSymbols,
@@ -18,6 +18,7 @@ internal class ReactLint(
         for (file in module.files) {
             RenderRules(file, symbols, lintSymbols, reporter, builtIns).check()
             if (reporter.isOn(LintRule.REACT_HOOKS_AS_VALUES)) HookDeclarations(file, reporter).check()
+            if (reporter.isOn(LintRule.REACT_ONLY_EXPORT_COMPONENTS)) ComponentExports(file, symbols, reporter).check()
         }
     }
 }

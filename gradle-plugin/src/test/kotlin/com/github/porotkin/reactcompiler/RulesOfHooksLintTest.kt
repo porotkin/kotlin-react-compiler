@@ -64,6 +64,7 @@ class RulesOfHooksLintTest : LintTest() {
                 div { +theme }
             }
             """,
+            fileAnnotations = """@file:Suppress("REACT_ONLY_EXPORT_COMPONENTS")""",
         )
     }
 

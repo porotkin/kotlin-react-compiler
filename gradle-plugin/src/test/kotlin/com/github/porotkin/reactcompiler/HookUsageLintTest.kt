@@ -81,6 +81,7 @@ class HookUsageLintTest : LintTest() {
                 div { +"${'$'}once ${'$'}label" }
             }
             """,
+            fileAnnotations = """@file:Suppress("REACT_ONLY_EXPORT_COMPONENTS")""",
         )
 
         assertTrue("Hook `useMemo` has a missing dependency: `props.filter`." in result.output, result.output)

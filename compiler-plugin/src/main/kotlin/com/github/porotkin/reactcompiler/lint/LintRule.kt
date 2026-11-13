@@ -12,7 +12,7 @@ internal enum class LintLevel {
  * declaration.
  *
  * The rules are the [Rules of React](https://react.dev/reference/rules) as React's own linter enforces them: each
- * one carries the name of a rule of
+ * one but the last carries the name of a rule of
  * [`eslint-plugin-react-hooks`](https://react.dev/reference/eslint-plugin-react-hooks), or of the Rule of React it
  * checks where that plugin has no rule for it, and the level the plugin's `recommended` preset gives it.
  */
@@ -52,6 +52,12 @@ internal enum class LintRule(val default: LintLevel) {
 
     /** `use-memo`: `useMemo` computes a value, and the value is used. */
     REACT_USE_MEMO(LintLevel.ERROR),
+
+    /**
+     * Not a Rule of React: a file that exports a component exports nothing else, which Fast Refresh needs. It is
+     * `only-export-components` of `eslint-plugin-react-refresh`.
+     */
+    REACT_ONLY_EXPORT_COMPONENTS(LintLevel.WARNING),
 }
 
 /** The level of every rule: its default, unless another one is set for it. */
