@@ -42,8 +42,10 @@ class ReactCompilerPlugin : KotlinCompilerPluginSupportPlugin {
 
         val project = kotlinCompilation.target.project
         val lint = project.extensions.getByType<ReactCompilerExtension>().lint
+        // Fast Refresh only ever loads the main compilation, so what the files of the others export does not matter.
+        val forCompilation = if (kotlinCompilation.name == KotlinCompilation.MAIN_COMPILATION_NAME) emptyList() else listOf(NO_EXPORT_RULE)
         return lint.enabled.zip(lint.levels) { enabled, levels ->
-            (if (enabled) levels else listOf(LINT_OFF)).map { SubpluginOption(LINT_OPTION, it) }
+            (if (enabled) levels + forCompilation else listOf(LINT_OFF)).map { SubpluginOption(LINT_OPTION, it) }
         }
     }
 }

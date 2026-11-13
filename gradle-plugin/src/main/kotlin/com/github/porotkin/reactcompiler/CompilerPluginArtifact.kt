@@ -11,6 +11,7 @@ internal const val EXTENSION_NAME = "reactCompiler"
 internal const val LINT_OPTION = "lint"
 internal const val LINT_OFF = "off"
 internal const val ALL_RULES = "all"
+internal const val NO_EXPORT_RULE = "REACT_ONLY_EXPORT_COMPONENTS:off"
 
 private val PROPERTIES: Properties =
     Properties().apply {
