@@ -28,8 +28,11 @@ import org.jetbrains.kotlin.ir.symbols.IrSymbol
 import org.jetbrains.kotlin.ir.symbols.IrValueSymbol
 import org.jetbrains.kotlin.ir.types.classOrNull
 import org.jetbrains.kotlin.ir.util.fqNameWhenAvailable
+import org.jetbrains.kotlin.ir.util.isEffectivelyExternal
 import org.jetbrains.kotlin.ir.util.isFunction
 import org.jetbrains.kotlin.ir.util.isFunctionMarker
+import org.jetbrains.kotlin.ir.util.isFunctionTypeOrSubtype
+import org.jetbrains.kotlin.ir.util.isGetter
 import org.jetbrains.kotlin.ir.util.isSubtypeOfClass
 import org.jetbrains.kotlin.ir.util.isSuspendFunction
 import org.jetbrains.kotlin.ir.visitors.IrVisitorVoid
@@ -43,7 +46,8 @@ import org.jetbrains.kotlin.name.FqName
  * render. The rules, each named after the one of React's linter that it follows:
  *
  * - [LintRule.REACT_RULES_OF_HOOKS]: a hook call sits at the top level of a component or of a hook;
- * - [LintRule.REACT_EXHAUSTIVE_DEPS]: the dependencies of a hook are complete, see [ExhaustiveDeps].
+ * - [LintRule.REACT_EXHAUSTIVE_DEPS]: the dependencies of a hook are complete, see [ExhaustiveDeps];
+ * - [LintRule.REACT_HOOKS_AS_VALUES]: nothing but a hook is named like one, where React Compiler reads the name.
  */
 internal class RenderRules(
     private val file: IrFile,
@@ -65,6 +69,7 @@ internal class RenderRules(
     /** The locals whose value is the same on every render, see [ExhaustiveDeps]. */
     private val stable = mutableSetOf<IrSymbol>()
 
+    private val reportedNames = mutableSetOf<IrValueSymbol>()
     private val dependencies = ExhaustiveDeps(file, lint, reporter, delegated, stable)
 
     fun check() {
@@ -202,6 +207,7 @@ internal class RenderRules(
         classifyLambdas(expression, callee)
         if (isHook || callee.isUse()) checkHookCall(expression, callee)
         if (isHook) dependencies.check(expression, callee, localScope())
+        checkHookNamedProperty(expression, callee)
         expression.acceptChildrenVoid(this)
     }
 
@@ -290,6 +296,25 @@ internal class RenderRules(
         report(LintRule.REACT_RULES_OF_HOOKS, call, "Hook `${callee.name}` $problem.")
     }
 
+    // Hook names on values
+
+    override fun visitGetValue(expression: IrGetValue) {
+        val value = expression.symbol.owner
+        val isMisnamed = value.name.isHookName() && !value.type.isFunctionTypeOrSubtype() && reactFunction() != null
+        if (isMisnamed && reportedNames.add(expression.symbol)) report(LintRule.REACT_HOOKS_AS_VALUES, value, notAHookMessage("${value.name}"))
+    }
+
+    /** A property of an external declaration keeps its name in JavaScript, where a `use` name makes it a hook. */
+    private fun checkHookNamedProperty(
+        call: IrCall,
+        callee: IrSimpleFunction,
+    ) {
+        val property = callee.correspondingPropertySymbol?.owner ?: return
+        if (!property.name.isHookName() || !property.isEffectivelyExternal() || reactFunction() == null) return
+        val type = if (callee.isGetter) callee.returnType else callee.parameters.last().type
+        if (!type.isFunctionTypeOrSubtype()) report(LintRule.REACT_HOOKS_AS_VALUES, call, notAHookMessage("${property.name}"))
+    }
+
     override fun visitRichFunctionReference(expression: IrRichFunctionReference) {
         // The function a `::reference` invokes through is generated: only the values it is bound to are code of the file.
         if (expression.reflectionTargetSymbol == null) expression.acceptChildrenVoid(this) else expression.boundValues.forEach { it.acceptVoid(this) }
@@ -365,6 +390,9 @@ private class Site {
 }
 
 private const val EVERY_RENDER = "A component or hook must call the same hooks in the same order on every render"
+
+private fun notAHookMessage(name: String): String =
+    "`$name` is not a hook, but React Compiler takes every name that starts with `use` for one. Rename it."
 
 private val USE = FqName("react.use")
 

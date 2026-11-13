@@ -15,6 +15,7 @@ internal class ReactLint(
     fun check(module: IrModuleFragment) {
         for (file in module.files) {
             RenderRules(file, symbols, lintSymbols, reporter).check()
+            if (reporter.isOn(LintRule.REACT_HOOKS_AS_VALUES)) HookDeclarations(file, reporter).check()
         }
     }
 }

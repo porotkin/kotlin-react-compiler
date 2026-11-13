@@ -39,6 +39,7 @@ class HookLoweringTest : PluginTest() {
             suspend fun useSuspended(): Int = 42
 
             class Holder {
+                @Suppress("REACT_HOOKS_AS_VALUES")
                 fun useMember(): Int = 1
             }
             """,

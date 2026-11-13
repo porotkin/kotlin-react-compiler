@@ -22,6 +22,9 @@ internal enum class LintRule(val default: LintLevel) {
 
     /** `exhaustive-deps`: the dependencies of a hook name every value its callback reads. */
     REACT_EXHAUSTIVE_DEPS(LintLevel.WARNING),
+
+    /** "Never pass around Hooks as regular values": a hook is a top-level function that is only ever called. */
+    REACT_HOOKS_AS_VALUES(LintLevel.ERROR),
 }
 
 /** The level of every rule: its default, unless another one is set for it. */
