@@ -78,6 +78,7 @@ internal class TestProject(
         write("$STUBS_MODULE/src/jsMain/kotlin/ReactRawStubs.kt", REACT_RAW_STUBS)
         write("$STUBS_MODULE/src/jsMain/kotlin/ReactJsxStubs.kt", REACT_JSX_STUBS)
         write("$STUBS_MODULE/src/jsMain/kotlin/ReactHookStubs.kt", REACT_HOOK_STUBS)
+        write("$STUBS_MODULE/src/jsMain/kotlin/ReactUseStubs.kt", REACT_USE_STUBS)
         write(
             "settings.gradle.kts",
             """
@@ -415,4 +416,18 @@ private val REACT_HOOK_STUBS =
 
     fun <T> use(context: Context<T>): T =
         js("null").unsafeCast<T>()
+    """.trimIndent() + "\n"
+
+private val REACT_USE_STUBS =
+    """
+    package react.use
+
+    import kotlin.reflect.KProperty
+
+    class LatestInstance<T>(private val value: T) {
+        operator fun getValue(thisRef: Nothing?, property: KProperty<*>): T = value
+    }
+
+    fun <T> useLatest(value: T): LatestInstance<T> =
+        LatestInstance(value)
     """.trimIndent() + "\n"

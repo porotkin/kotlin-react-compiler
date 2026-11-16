@@ -34,12 +34,15 @@ class HookUsageLintTest : LintTest() {
                     ref.current = "clicked"
                     setCount(count + limit)
                 }
+                // Neither does a local delegated to a ref.
+                val onFilter by react.use.useLatest(props.filter)
+                val isShown = useCallback { item: String -> onFilter(item) }
                 // A dependency that is an expression covers the values it mentions.
                 val size = useMemo(store.size > 0) { store.size }
                 // Without dependencies an effect runs after every render.
                 useEffect { println(title) }
                 useEffect(title, store) { println("${'$'}title ${'$'}store") }
-                div { +"${'$'}filtered ${'$'}byProps ${'$'}label ${'$'}onClick ${'$'}size" }
+                div { +"${'$'}filtered ${'$'}byProps ${'$'}label ${'$'}onClick ${'$'}isShown ${'$'}size" }
             }
 
             val Incomplete: FC<ItemProps> = FC { props ->

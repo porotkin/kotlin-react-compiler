@@ -28,10 +28,12 @@ class RenderLintTest : LintTest() {
 
             val Delegated: FC<ListProps> = FC { props ->
                 var latest by useRefValue(props.count)
+                val onLatest by react.use.useLatest(props.count)
                 latest = props.count // ! REACT_REFS
                 val seen = latest // ! REACT_REFS
-                useEffect { latest = 0 }
-                div { +"${'$'}seen" }
+                val current = onLatest // ! REACT_REFS
+                useEffect { latest = onLatest }
+                div { +"${'$'}seen ${'$'}current" }
             }
 
             fun useLength(ref: RefObject<String>): Int =

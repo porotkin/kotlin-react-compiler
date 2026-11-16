@@ -10,10 +10,11 @@ import org.jetbrains.kotlin.name.FqName
 import org.jetbrains.kotlin.name.Name
 
 private val REACT = FqName("react")
+private val REACT_USE = FqName("react.use")
 
 /**
- * The kotlin-react classes the rules tell refs and state by. A class the classpath does not have is `null`, and the
- * checks that need it find nothing: the linter keeps working with a kotlin-react that names things differently.
+ * The classes of kotlin-react and kotlin-react-use the rules tell refs and state by. A class missing from the
+ * classpath matches nothing: the linter keeps working with a kotlin-react that names things differently.
  */
 internal class LintSymbols(
     finder: DeclarationFinder,
@@ -21,8 +22,8 @@ internal class LintSymbols(
     /** `useRef()`: its `current` is the ref's value. */
     private val refObject = finder.reactClass("RefObject")
 
-    /** `by useRefValue()`: a local delegated to a ref. */
-    private val refValue = finder.reactClass("RefValueInstance")
+    /** `by useRefValue()`, and `by useLatest()` of kotlin-react-use: a local delegated to a ref. */
+    private val refValues = listOfNotNull(finder.reactClass("RefValueInstance"), finder.reactClass("LatestInstance", REACT_USE))
 
     /** `by useState()`: a local delegated to a state, whose assignment sets the state. */
     private val state = finder.reactClass("StateInstance")
@@ -36,15 +37,18 @@ internal class LintSymbols(
     fun isRefAccess(call: IrCall): Boolean =
         call.symbol.owner.correspondingPropertySymbol?.owner?.name?.asString() == "current" && call.receiver()?.type?.let(::isRef) == true
 
-    fun isRefValue(type: IrType): Boolean = type.isA(refValue)
+    fun isRefValue(type: IrType): Boolean = refValues.any { type.isA(it) }
 
     fun isState(type: IrType): Boolean = type.isA(state)
 
     fun isStateSetter(type: IrType): Boolean = type.isA(stateSetter)
 }
 
-private fun DeclarationFinder.reactClass(name: String): IrClassSymbol? =
-    findClass(ClassId(REACT, Name.identifier(name)))
+private fun DeclarationFinder.reactClass(
+    name: String,
+    packageName: FqName = REACT,
+): IrClassSymbol? =
+    findClass(ClassId(packageName, Name.identifier(name)))
 
 private fun IrType.isA(symbol: IrClassSymbol?): Boolean =
     symbol != null && isSubtypeOfClass(symbol)

@@ -135,7 +135,7 @@ internal class ExhaustiveDeps(
             is IrCall -> {
                 val local = delegated[symbol]
                 when {
-                    // `by useRefValue()` is a ref, and assigning a `by useState()` local calls its setter: neither changes.
+                    // A local delegated to a ref is the ref, and assigning a `by useState()` local calls its setter: neither changes.
                     local != null -> {
                         val isRead = symbol == local.getter.symbol && local.delegate?.type?.let(lint::isRefValue) != true
                         Path(local.symbol, local.name.asString(), emptyList(), !isRead).takeIf { local.parent in scope }
