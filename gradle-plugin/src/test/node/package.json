@@ -1,0 +1,12 @@
+{
+  "name": "kotlin-react-compiler-test-runtime",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@babel/core": "7.29.13",
+    "babel-plugin-react-compiler": "1.0.0",
+    "jsdom": "31.0.1",
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
+  }
+}

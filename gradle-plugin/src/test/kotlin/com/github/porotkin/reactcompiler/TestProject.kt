@@ -8,6 +8,7 @@ internal class TestProject(
     private val dir: File,
     private val kotlinVersion: String = System.getProperty("kotlinVersion"),
     private val externalProps: Boolean = false,
+    private val realReact: Boolean = false,
 ) {
     private val repository = System.getProperty("testRepository")
 
@@ -15,12 +16,14 @@ internal class TestProject(
 
     private val pluginVersion = System.getProperty("pluginVersion")
 
-    private val modules = mutableListOf(STUBS_MODULE)
+    private val kotlinReactVersion = System.getProperty("kotlinReactVersion")
+
+    private val modules = if (realReact) mutableListOf() else mutableListOf(STUBS_MODULE)
 
     /**
-     * Adds a module compiled with the plugin. It depends on the React stubs, which, like kotlin-react, are compiled
-     * without the plugin, and on the modules in [dependsOn]. A module compiled without the plugin gets the annotations
-     * artifact explicitly, as a project that adds it by hand would.
+     * Adds a module compiled with the plugin. It depends on the React stubs (or, when [realReact] is set, on
+     * `kotlin-react`), which are compiled without the plugin, and on the modules in [dependsOn]. A module compiled
+     * without the plugin gets the annotations artifact explicitly, as a project that adds it by hand would.
      */
     fun module(
         name: String,
@@ -30,8 +33,13 @@ internal class TestProject(
         configuration: String = "",
     ) {
         modules += name
+        val reactDependency = if (realReact) {
+            "implementation(\"org.jetbrains.kotlin-wrappers:kotlin-react:$kotlinReactVersion\")"
+        } else {
+            "implementation(project(\":$STUBS_MODULE\"))"
+        }
         val annotations = if (applyPlugin) emptyList() else listOf("implementation(\"$ANNOTATIONS_MODULE:$pluginVersion\")")
-        val dependencies = ((listOf(STUBS_MODULE) + dependsOn).map { "implementation(project(\":$it\"))" } + annotations).joinToString("; ")
+        val dependencies = (listOf(reactDependency) + dependsOn.map { "implementation(project(\":$it\"))" } + annotations).joinToString("; ")
         val pluginsBlock = if (applyPlugin) "plugins {\n    id(\"$pluginId\")\n}\n" else ""
         write(
             "$name/build.gradle.kts",
@@ -73,12 +81,14 @@ internal class TestProject(
     }
 
     private fun writeRootBuild() {
-        write("$STUBS_MODULE/build.gradle.kts", "")
-        write("$STUBS_MODULE/src/jsMain/kotlin/ReactStubs.kt", if (externalProps) REACT_EXTERNAL_STUBS else REACT_STUBS)
-        write("$STUBS_MODULE/src/jsMain/kotlin/ReactRawStubs.kt", REACT_RAW_STUBS)
-        write("$STUBS_MODULE/src/jsMain/kotlin/ReactJsxStubs.kt", REACT_JSX_STUBS)
-        write("$STUBS_MODULE/src/jsMain/kotlin/ReactHookStubs.kt", REACT_HOOK_STUBS)
-        write("$STUBS_MODULE/src/jsMain/kotlin/ReactUseStubs.kt", REACT_USE_STUBS)
+        if (!realReact) {
+            write("$STUBS_MODULE/build.gradle.kts", "")
+            write("$STUBS_MODULE/src/jsMain/kotlin/ReactStubs.kt", if (externalProps) REACT_EXTERNAL_STUBS else REACT_STUBS)
+            write("$STUBS_MODULE/src/jsMain/kotlin/ReactRawStubs.kt", REACT_RAW_STUBS)
+            write("$STUBS_MODULE/src/jsMain/kotlin/ReactJsxStubs.kt", REACT_JSX_STUBS)
+            write("$STUBS_MODULE/src/jsMain/kotlin/ReactHookStubs.kt", REACT_HOOK_STUBS)
+            write("$STUBS_MODULE/src/jsMain/kotlin/ReactUseStubs.kt", REACT_USE_STUBS)
+        }
         write(
             "settings.gradle.kts",
             """
