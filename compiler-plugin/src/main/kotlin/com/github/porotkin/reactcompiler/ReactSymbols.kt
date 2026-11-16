@@ -114,20 +114,26 @@ internal class ReactSymbols private constructor(
         .findFunctions(callable(REACT_INTERNAL, "createCleanupCallback"))
         .singleOrNull { it.owner.parameters.size == 1 && it.owner.typeParameters.isEmpty() }
 
+    /** `useRef()`: its `current` holds the ref's value. Optional so lint degrades gracefully when absent. */
+    val refObjectClass: IrClassSymbol? = finder.findClass(classId(REACT, "RefObject"))
+
     /** `by useRefValue()`, and `by useLatest()` of kotlin-react-use: delegates that read and write a ref's `current`. */
     val refDelegates: List<IrClassSymbol> =
         listOfNotNull(finder.findClass(classId(REACT, "RefValueInstance")), finder.findClass(classId(REACT_USE, "LatestInstance")))
 
+    val stateInstanceClass: IrClassSymbol? = finder.findClass(classId(REACT, "StateInstance"))
+    val stateSetterClass: IrClassSymbol? = finder.findClass(classId(REACT, "StateSetter"))
+
     /** `by useState()`, or `null` when kotlin-react declares none of what [StateDelegate] needs. */
     val stateDelegate: StateDelegate? = run {
-        val instance = classId(REACT, "StateInstance")
-        val setter = classId(REACT, "StateSetter")
+        val instanceId = classId(REACT, "StateInstance")
+        val setterId = classId(REACT, "StateSetter")
         StateDelegate(
-            instance = finder.findClass(instance) ?: return@run null,
-            component1 = member(instance, "component1") { it.owner.parameters.size == 1 } ?: return@run null,
-            component2 = member(instance, "component2") { it.owner.parameters.size == 1 } ?: return@run null,
-            setter = finder.findClass(setter) ?: return@run null,
-            setValue = member(setter, "invoke") {
+            instance = stateInstanceClass ?: return@run null,
+            component1 = member(instanceId, "component1") { it.owner.parameters.size == 1 } ?: return@run null,
+            component2 = member(instanceId, "component2") { it.owner.parameters.size == 1 } ?: return@run null,
+            setter = stateSetterClass ?: return@run null,
+            setValue = member(setterId, "invoke") {
                 it.owner.parameters.size == 2 && it.owner.parameters[1].type.classifierOrNull is IrTypeParameterSymbol
             } ?: return@run null,
         )

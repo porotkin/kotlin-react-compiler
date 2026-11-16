@@ -7,7 +7,6 @@ import com.github.porotkin.reactcompiler.hook.HookCallLowering
 import com.github.porotkin.reactcompiler.hook.HookDirectiveLowering
 import com.github.porotkin.reactcompiler.lint.LintConfig
 import com.github.porotkin.reactcompiler.lint.LintReporter
-import com.github.porotkin.reactcompiler.lint.LintSymbols
 import com.github.porotkin.reactcompiler.lint.ReactLint
 import org.jetbrains.kotlin.backend.common.extensions.IrGenerationExtension
 import org.jetbrains.kotlin.backend.common.extensions.IrPluginContext
@@ -37,7 +36,7 @@ class ReactCompilerIrGenerationExtension internal constructor(
         val finder = pluginContext.finderForSource(file)
         val symbols = ReactSymbols.resolve(finder, pluginContext) ?: return
         val reporter = LintReporter(pluginContext, lint)
-        ReactLint(symbols, LintSymbols(finder), reporter, pluginContext.irBuiltIns).check(moduleFragment)
+        ReactLint(symbols, reporter, pluginContext.irBuiltIns).check(moduleFragment)
         listOf(
             DelegateLowering(pluginContext, symbols),
             HookCallLowering(pluginContext, symbols),
