@@ -38,7 +38,7 @@ internal class ComponentLowering(
 
     override fun lower(irFile: IrFile) {
         fileEntry = irFile.fileEntry
-        helpers = ComponentHelpers(irFile, symbols, ::rewrite)
+        helpers = ComponentHelpers(irFile, symbols) { fn, builder, items, memoize -> rewrite(fn, builder, items, memoize, helper = true) }
         super.lower(irFile)
         helpers.install()
     }
@@ -94,7 +94,8 @@ internal class ComponentLowering(
         builderParameter: IrValueParameter,
         items: List<Item>,
         memoize: Boolean = true,
+        helper: Boolean = false,
     ) {
-        ComponentEmitter(fn, symbols, builder(fn.symbol, fn), fileEntry, helpers::resolve).rewrite(builderParameter, items, memoize)
+        ComponentEmitter(fn, symbols, builder(fn.symbol, fn), fileEntry, helpers::resolve, helper).rewrite(builderParameter, items, memoize)
     }
 }

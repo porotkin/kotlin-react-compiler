@@ -183,6 +183,14 @@ class ReactRuntimeTest : PluginTest() {
                     for (item in items) li { +item }
                 }
 
+                private fun ChildrenBuilder.Row(item: String) {
+                    li { +item }
+                }
+
+                private fun ChildrenBuilder.Cell(item: String) {
+                    if (item == "b") li { +"B" } else li { +item }
+                }
+
                 val OnlyLoop: FC<ListProps> = FC { props ->
                     ul {
                         for (item in props.items) li { +item }
@@ -216,8 +224,22 @@ class ReactRuntimeTest : PluginTest() {
                     ul { Items(props.items) }
                 }
 
+                val HelperInLoop: FC<ListProps> = FC { props ->
+                    ul {
+                        for (item in props.items) Cell(item)
+                    }
+                }
+
+                val HelperTwice: FC<ListProps> = FC { props ->
+                    ul {
+                        Row(props.items.first())
+                        Row(props.items.last())
+                    }
+                }
+
                 @JsExport
-                fun listComponents(): Array<Any> = arrayOf(OnlyLoop, LoopWithSiblings, NestedLoops, RootLoop, HelperLoop)
+                fun listComponents(): Array<Any> =
+                    arrayOf(OnlyLoop, LoopWithSiblings, NestedLoops, RootLoop, HelperLoop, HelperInLoop, HelperTwice)
                 """,
             )
         }.run(":app:compileDevelopmentExecutableKotlinJs")
@@ -242,17 +264,19 @@ class ReactRuntimeTest : PluginTest() {
             """.trimIndent(),
         )
 
-        for (name in listOf("OnlyLoop", "LoopWithSiblings", "NestedLoops", "RootLoop", "HelperLoop")) {
+        for (name in listOf("OnlyLoop", "LoopWithSiblings", "NestedLoops", "RootLoop", "HelperLoop", "HelperInLoop", "HelperTwice")) {
             assertTrue("$name\$lambda" in output, "Expected $name compiled by React Compiler in:\n$output")
         }
-        assertTrue(""""consoleErrors":[]""" in output, "Expected no key warnings for loop children in:\n$output")
+        assertTrue(""""consoleErrors":[]""" in output, "Expected no key warnings for loop or helper children in:\n$output")
         assertTrue(
             """"html":[""" +
                 """"<ul><li>a</li><li>b</li><li>c</li></ul>",""" +
                 """"<ul><li>first</li><li>a</li><li>b</li><li>c</li><li>last</li></ul>",""" +
                 """"<ul><li>a</li><li>b</li><li>c</li><li>a</li><li>b</li><li>c</li></ul>",""" +
                 """"<li>a</li><li>b</li><li>c</li>",""" +
-                """"<ul><li>a</li><li>b</li><li>c</li></ul>"]""" in output,
+                """"<ul><li>a</li><li>b</li><li>c</li></ul>",""" +
+                """"<ul><li>a</li><li>B</li><li>c</li></ul>",""" +
+                """"<ul><li>a</li><li>c</li></ul>"]""" in output,
             "Expected every loop child rendered in order in:\n$output",
         )
     }

@@ -34,7 +34,7 @@ executable too.
 
 ## What It Lowers
 
-- **Component lowering (`FC`):** Rewrites `FC { ... }` component lambdas from `($this$FC, props) -> Unit` into `(props) -> ReactNode?` functions that emit `"use memo"` at the start of the body, keep hook calls at the top level, and lower `ChildrenBuilder` element DSL calls into direct `jsx(type, attrs, key)` calls. The key is the element's explicit `key` when one is set, otherwise `"@rdk/<line>_<col>"` of the call site; an element a loop adds gets no source key, which would be the same for every item. The children of an element with a loop among them, including one in an `if`, `when` or `let`, are pushed onto one array React gets as static children (`jsxs`), as kotlin-react's builder collects them.
+- **Component lowering (`FC`):** Rewrites `FC { ... }` component lambdas from `($this$FC, props) -> Unit` into `(props) -> ReactNode?` functions that emit `"use memo"` at the start of the body, keep hook calls at the top level, and lower `ChildrenBuilder` element DSL calls into direct `jsx(type, attrs, key)` calls. The key is the element's explicit `key` when one is set, otherwise `"@rdk/<line>_<col>"` of the call site; an element a loop adds gets no source key, which would be the same for every item, and neither does the node a component helper returns, which its caller may call more than once under one parent. The children of an element with a loop among them, including one in an `if`, `when` or `let`, are pushed onto one array React gets as static children (`jsxs`), as kotlin-react's builder collects them.
 
   ```kotlin
   val Title = FC<TitleProps> { props ->
@@ -63,7 +63,7 @@ executable too.
     var title = useLabel(props.title);
     var attrs = {};
     attrs.children = title;
-    return jsx(h1, attrs, '@rdk/2_4');
+    return jsx(h1, attrs, null);
   }
   ```
 - **Hook argument reordering (`useMemo` / `useCallback`):** Rewrites `kotlin-react`'s `(vararg dependencies, callback)` hook calls to `useMemoRaw(callback, dependencies)` / `useCallbackRaw(callback, dependencies)` in IR before Kotlin/JS lowers arguments into reversed evaluation-order temporaries or applies Seskar `@JsRaw` value-class dependency array wrappers. Dependencies other than plain variables are bound to locals first; calls spreading a vararg (`useMemo(*deps) { }`) are left as is.

@@ -56,7 +56,8 @@ import org.jetbrains.kotlin.ir.visitors.transformChildrenVoid
 /**
  * Writes an analyzed body back as IR for [fn]: `"use memo"` when [fn] is a component or a hook helper, the [Plain]
  * statements in order, each element as a `jsx(type, attrs, key)` (or, with several children, `jsxs`) call bound to a
- * local, and a `return` of the root node. Calls to helpers go to the lowered helper [resolveHelper] returns.
+ * local, and a `return` of the root node. Calls to helpers go to the lowered helper [resolveHelper] returns. A [helper]
+ * returns a child of its caller, which may call it more than once under one parent, so its node gets no source key.
  *
  * The nodes built for a piece of the body take its position in the file ([at]), so source maps lead from the
  * generated code back to it.
@@ -67,6 +68,7 @@ internal class ComponentEmitter(
     private val b: IrBuilderWithScope,
     private val fileEntry: IrFileEntry,
     private val resolveHelper: (IrSimpleFunctionSymbol) -> IrSimpleFunctionSymbol,
+    private val helper: Boolean,
 ) {
     /** Element body receivers and `let` parameters, mapped to the locals that replace them. */
     private val substitutions = mutableMapOf<IrValueSymbol, IrVariable>()
@@ -126,16 +128,21 @@ internal class ComponentEmitter(
         items: List<Item>,
         out: MutableList<IrStatement>,
     ): IrExpression {
-        val node = node(items, out)
+        val node = node(items, out, repeated = helper)
         return at(node) { b.irReturn(node) }
     }
 
-    /** Emits [items] into [out] and returns the node they build: `null`, their only child, or a Fragment of them. */
+    /**
+     * Emits [items] into [out] and returns the node they build: `null`, their only child, or a Fragment of them. When
+     * that node is [repeated] among its siblings, so is an only child; the children of a Fragment are not.
+     */
     private fun node(
         items: List<Item>,
         out: MutableList<IrStatement>,
+        repeated: Boolean = false,
     ): IrExpression {
-        val children = Children(listFor(items, out))
+        val list = listFor(items, out)
+        val children = Children(list, repeated && list == null && items.count { it is Child } == 1)
         items.forEach { emit(it, out, children) }
         return nodeOf(children, out)
     }
@@ -163,7 +170,7 @@ internal class ComponentEmitter(
             is Child -> {
                 val list = children.list
                 when {
-                    list == null -> children.nodes += at(item.source) { child(item, out, repeated = false) }
+                    list == null -> children.nodes += at(item.source) { child(item, out, children.repeated) }
                     item is Nested -> at(item.source) { pushNested(item, list, out, children.repeated) }
                     else -> out += at(item.source) {
                         dynamic(IrDynamicOperator.INVOKE, b.irGet(list), "push", child(item, out, children.repeated))
@@ -188,7 +195,7 @@ internal class ComponentEmitter(
         return b.irWhen(unitType, listOf(b.irBranch(guard.condition, b.irBlock(resultType = unitType) { then.forEach { +it } })))
     }
 
-    /** The node of [child]; one [repeated] by a loop among its siblings gets no source key, which would repeat too. */
+    /** The node of [child]; one [repeated] among its siblings gets no source key, which would repeat too. */
     private fun child(
         child: Child,
         out: MutableList<IrStatement>,
@@ -202,10 +209,10 @@ internal class ComponentEmitter(
             is HelperCall -> b.irGet(local("el", helperCall(child.call), out))
             is ChildWithProps -> b.irGet(local("el", childWithProps(child), out))
             is Element -> b.irGet(local("el", element(child, repeated), out))
-            is Choice -> b.irGet(local("el", choice(child), out))
+            is Choice -> b.irGet(local("el", choice(child, repeated), out))
             is LetBlock -> {
                 substitutions[child.parameter.symbol] = local(child.parameter.name.asString(), child.value, out)
-                node(child.items, out)
+                node(child.items, out, repeated)
             }
             is WhileLoop, is RepeatLoop -> error("A loop is pushed onto the children array of its parent")
         }
@@ -332,10 +339,13 @@ internal class ComponentEmitter(
         return block(out)
     }
 
-    private fun choice(choice: Choice): IrExpression {
+    private fun choice(
+        choice: Choice,
+        repeated: Boolean,
+    ): IrExpression {
         val branches = choice.branches.map { branch ->
             val out = mutableListOf<IrStatement>()
-            out += node(branch.items, out)
+            out += node(branch.items, out, repeated)
             val condition = branch.condition
             if (condition == null) b.irElseBranch(block(out)) else b.irBranch(condition, block(out))
         }
@@ -452,7 +462,8 @@ internal class ComponentEmitter(
 
 /**
  * What a list of items adds, and in an element body the explicit `key`: its child [nodes] in order, or, with a [list],
- * statements pushing them onto that array. [repeated] when they are pushed from a loop, once per iteration.
+ * statements pushing them onto that array. [repeated] when each may repeat among its siblings: pushed from a loop, once
+ * per iteration, or the node of a helper, once per call.
  */
 private class Children(
     val list: IrVariable?,
