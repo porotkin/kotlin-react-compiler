@@ -127,7 +127,7 @@ that plugin's `recommended` preset gives the rule:
 | `REACT_ERROR_BOUNDARIES` | error | [`error-boundaries`](https://react.dev/reference/eslint-plugin-react-hooks/lints/error-boundaries) | An element created inside `try`. |
 | `REACT_USE_MEMO` | error | [`use-memo`](https://react.dev/reference/eslint-plugin-react-hooks/lints/use-memo) | `useMemo` whose callback returns `Unit`, or whose value is not used. |
 | `REACT_UNSUPPORTED_SYNTAX` | warning | [`unsupported-syntax`](https://react.dev/reference/eslint-plugin-react-hooks/lints/unsupported-syntax) | A component the plugin cannot lower, on the statement that stops it: React Compiler never sees the component. One that opts out with `"use no memo"` is not reported. |
-| `REACT_ONLY_EXPORT_COMPONENTS` | warning | not a Rule of React: `only-export-components` of `eslint-plugin-react-refresh` | In a file whose first exported `FC` property is its component, every other top-level declaration that is not `private`, external or a type alias. Fast Refresh keeps the state of a component only if its module exports nothing else. Test compilations are not checked. |
+| `REACT_ONLY_EXPORT_COMPONENTS` | warning | not a Rule of React: `only-export-components` of `eslint-plugin-react-refresh` | In a file whose component is its first exported `FC` property with a capitalized name and no receiver, every other top-level declaration that is not `private`, external or a type alias. Fast Refresh keeps the state of a component only if its module exports nothing else. Test compilations are not checked. |
 
 The other rules of the ESLint plugin have nothing to check in Kotlin: `config` and `gating` are about options of the
 Babel plugin, `incompatible-library` is the `incompatibleHooks` option of

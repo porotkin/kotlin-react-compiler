@@ -1,6 +1,7 @@
 package com.github.porotkin.reactcompiler.lint
 
 import com.github.porotkin.reactcompiler.ReactSymbols
+import com.github.porotkin.reactcompiler.isComponentName
 import org.jetbrains.kotlin.descriptors.DescriptorVisibilities
 import org.jetbrains.kotlin.ir.declarations.IrClass
 import org.jetbrains.kotlin.ir.declarations.IrDeclaration
@@ -19,7 +20,7 @@ import org.jetbrains.kotlin.ir.util.isSubtypeOfClass
  * component alone: with one JavaScript module per Kotlin file, a second export makes an edit of the file re-run the
  * modules that import it, or reload the page. A file exports its top-level declarations that are not `private` and
  * exist at run time, which leaves out external declarations and type aliases. Its component is the first exported
- * property typed `FC`; every other export of the file is reported.
+ * capitalized property without a receiver, typed `FC`; every other export of the file is reported.
  */
 internal class ComponentExports(
     private val file: IrFile,
@@ -44,5 +45,6 @@ internal class ComponentExports(
     }
 
     private fun IrDeclaration.isComponent(): Boolean =
-        this is IrProperty && (getter?.returnType ?: backingField?.type)?.isSubtypeOfClass(symbols.fcClass) == true
+        this is IrProperty && name.isComponentName() && getter?.parameters.isNullOrEmpty() &&
+            (getter?.returnType ?: backingField?.type)?.isSubtypeOfClass(symbols.fcClass) == true
 }

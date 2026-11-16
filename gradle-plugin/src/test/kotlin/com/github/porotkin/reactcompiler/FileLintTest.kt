@@ -56,10 +56,16 @@ class FileLintTest : LintTest() {
         assertTrue("`CardHeader` is a second component exported from this file" in result.output, result.output)
         assertTrue("`cardTitle` is exported from a file that exports the component `Card`" in result.output, result.output)
 
-        // Without a component a file exports what it likes.
+        // Without a component a file exports what it likes, including extension and lowercase FC helpers.
         assertLint(
             """
             val div: ElementType<FragmentProps> = "div".unsafeCast<ElementType<FragmentProps>>()
+
+            val <P : Props> FC<P>.styled: FC<P> get() = this
+
+            val <P : Props> FC<P>.Bold: FC<P> get() = this
+
+            val fallback: FC<Props> = FC {}
 
             const val WIDTH: Int = 100
 
