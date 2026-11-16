@@ -1,6 +1,7 @@
 package com.github.porotkin.reactcompiler.lint
 
 import com.github.porotkin.reactcompiler.ReactSymbols
+import com.github.porotkin.reactcompiler.buildsChildren
 import com.github.porotkin.reactcompiler.isComponentName
 import com.github.porotkin.reactcompiler.isHookName
 import com.github.porotkin.reactcompiler.isOnBuilder
@@ -45,13 +46,13 @@ internal class RenderScope(
     fun frameFor(declaration: IrSimpleFunction): Frame {
         val scope = when {
             declaration.name.isHookName() -> Scope.HOOK
-            declaration.buildsChildren() || declaration.name.isComponentName() -> Scope.COMPONENT
+            declaration.buildsChildren(symbols) || declaration.name.isComponentName() -> Scope.COMPONENT
             else -> Scope.OTHER
         }
         // A capitalized function is a component by its name only, so it is held to the rules of render only if it takes props.
         val renders = when (scope) {
             Scope.HOOK -> true
-            Scope.COMPONENT -> declaration.buildsChildren() || declaration.parameters.any { it.type.isSubtypeOfClass(symbols.propsClass) }
+            Scope.COMPONENT -> declaration.buildsChildren(symbols) || declaration.parameters.any { it.type.isSubtypeOfClass(symbols.propsClass) }
             else -> false
         }
         return Frame(scope, declaration, renders, declaration.optsOutOfMemo(symbols))
@@ -156,9 +157,6 @@ internal class RenderScope(
             else -> Scope.CALLBACK
         }
     }
-
-    private fun IrFunction.buildsChildren(): Boolean =
-        parameters.any { it.type.isSubtypeOfClass(symbols.childrenBuilderClass) }
 
     /** `ChildrenBuilder.(...) -> Unit`: the lambda of a component, as `FC` takes it. */
     private fun IrFunction.isRenderLambda(): Boolean =
