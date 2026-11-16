@@ -1,6 +1,7 @@
 package com.github.porotkin.reactcompiler.lint
 
 import com.github.porotkin.reactcompiler.ReactSymbols
+import com.github.porotkin.reactcompiler.isHookName
 import org.jetbrains.kotlin.descriptors.InlineClassRepresentation
 import org.jetbrains.kotlin.ir.IrElement
 import org.jetbrains.kotlin.ir.declarations.IrDeclarationParent
@@ -9,7 +10,9 @@ import org.jetbrains.kotlin.ir.declarations.IrLocalDelegatedProperty
 import org.jetbrains.kotlin.ir.declarations.IrParameterKind
 import org.jetbrains.kotlin.ir.declarations.IrSimpleFunction
 import org.jetbrains.kotlin.ir.declarations.IrValueParameter
+import org.jetbrains.kotlin.ir.declarations.IrVariable
 import org.jetbrains.kotlin.ir.expressions.IrCall
+import org.jetbrains.kotlin.ir.expressions.IrConst
 import org.jetbrains.kotlin.ir.expressions.IrExpression
 import org.jetbrains.kotlin.ir.expressions.IrFunctionExpression
 import org.jetbrains.kotlin.ir.expressions.IrGetValue
@@ -18,6 +21,7 @@ import org.jetbrains.kotlin.ir.expressions.IrTypeOperatorCall
 import org.jetbrains.kotlin.ir.expressions.IrVararg
 import org.jetbrains.kotlin.ir.symbols.IrSimpleFunctionSymbol
 import org.jetbrains.kotlin.ir.symbols.IrSymbol
+import org.jetbrains.kotlin.ir.symbols.IrValueSymbol
 import org.jetbrains.kotlin.ir.types.IrType
 import org.jetbrains.kotlin.ir.types.classOrNull
 import org.jetbrains.kotlin.ir.util.isGetter
@@ -45,9 +49,24 @@ internal class ExhaustiveDeps(
     private val reporter: LintReporter,
     /** The accessors of `by` locals, which a read or an assignment of the local calls. */
     private val delegated: Map<IrSimpleFunctionSymbol, IrLocalDelegatedProperty>,
-    /** The locals whose value is the same on every render. */
-    private val stable: Set<IrSymbol>,
 ) {
+    /** The hook each local was returned by, which tells the setter of `val (state, setState) = useState()`. */
+    private val hookResults = mutableMapOf<IrValueSymbol, String>()
+
+    /** The locals whose value is the same on every render. */
+    private val stable = mutableSetOf<IrSymbol>()
+
+    /** Records locals whose value never changes across renders: constants, refs, effect events, and state setters. */
+    fun recordVariable(declaration: IrVariable) {
+        val value = declaration.initializer ?: return
+        val call = value as? IrCall
+        val callee = call?.symbol?.owner?.name?.asString()
+        if (call != null && call.symbol.owner.name.isHookName()) hookResults[declaration.symbol] = callee!!
+        if (declaration.isVar) return
+        val isSetter = callee == "component2" && (call.receiver() as? IrGetValue)?.symbol?.let(hookResults::get) in HOOKS_RETURNING_SETTERS
+        if (value is IrConst || callee in HOOKS_RETURNING_STABLE_VALUES || isSetter) stable += declaration.symbol
+    }
+
     /** Checks [call] of the hook [callee], made in code whose locals belong to the functions in [scope]. */
     fun check(
         call: IrCall,
@@ -209,3 +228,7 @@ private fun IrValueParameter.isDependencies(): Boolean =
     varargElementType != null && name.asString() in DEPENDENCY_PARAMETERS
 
 private val DEPENDENCY_PARAMETERS = setOf("dependencies", "deps")
+
+/** The hooks whose result never changes, and those that return a pair whose second part never does. */
+private val HOOKS_RETURNING_STABLE_VALUES = setOf("useRef", "useEffectEvent")
+private val HOOKS_RETURNING_SETTERS = setOf("useState", "useReducer", "useActionState", "useTransition")

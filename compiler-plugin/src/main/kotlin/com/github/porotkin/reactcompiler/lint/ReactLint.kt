@@ -16,7 +16,7 @@ internal class ReactLint(
     fun check(module: IrModuleFragment) {
         val lintSymbols = LintSymbols(symbols)
         for (file in module.files) {
-            RenderRules(file, symbols, lintSymbols, reporter, builtIns).check()
+            RenderWalk(file, symbols, lintSymbols, reporter, builtIns).check(file)
             if (reporter.isOn(LintRule.REACT_HOOKS_AS_VALUES)) HookDeclarations(file, reporter).check()
             if (reporter.isOn(LintRule.REACT_ONLY_EXPORT_COMPONENTS)) ComponentExports(file, symbols, reporter).check()
         }

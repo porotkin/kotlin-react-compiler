@@ -6,6 +6,7 @@ import org.jetbrains.kotlin.ir.declarations.IrParameterKind
 import org.jetbrains.kotlin.ir.declarations.IrProperty
 import org.jetbrains.kotlin.ir.declarations.IrSimpleFunction
 import org.jetbrains.kotlin.ir.declarations.IrValueParameter
+import org.jetbrains.kotlin.ir.expressions.IrCall
 import org.jetbrains.kotlin.ir.symbols.IrSimpleFunctionSymbol
 import org.jetbrains.kotlin.ir.types.IrSimpleType
 import org.jetbrains.kotlin.ir.types.IrType
@@ -13,6 +14,7 @@ import org.jetbrains.kotlin.ir.types.IrTypeProjection
 import org.jetbrains.kotlin.ir.types.classOrNull
 import org.jetbrains.kotlin.ir.types.isUnit
 import org.jetbrains.kotlin.ir.util.allOverridden
+import org.jetbrains.kotlin.ir.util.fqNameWhenAvailable
 import org.jetbrains.kotlin.ir.util.hasAnnotation
 import org.jetbrains.kotlin.ir.util.isSubtypeOfClass
 import org.jetbrains.kotlin.ir.util.parentClassOrNull
@@ -21,6 +23,7 @@ import org.jetbrains.kotlin.name.FqName
 private val COMPONENT_WRAPPER = FqName("com.github.porotkin.reactcompiler.ComponentWrapper")
 private val ELEMENT_WRAPPER = FqName("com.github.porotkin.reactcompiler.ElementWrapper")
 private val ELEMENT_BUILDER = FqName("react.ElementBuilder")
+private val COMPONENT_FACTORIES = setOf("react.memo", "react.forwardRef", "react.lazy").mapTo(mutableSetOf(), ::FqName)
 
 internal val SET_DEFAULT_KEY = FqName("react.setDefaultKey")
 
@@ -66,6 +69,12 @@ internal fun IrSimpleFunction.componentWrapperRenderParameter(symbols: ReactSymb
     return parameters.singleOrNull { it.type.isRenderLambdaType(symbols) }
 }
 
+/** Whether [this] call is made on a `ChildrenBuilder`: as its member, its extension, or in its context. */
+internal fun IrCall.isOnBuilder(symbols: ReactSymbols): Boolean =
+    symbol.owner.parameters.withIndex().any { (index, parameter) ->
+        parameter.kind != IrParameterKind.Regular && arguments[index]?.type?.isSubtypeOfClass(symbols.childrenBuilderClass) == true
+    }
+
 /** kotlin-react's `@ElementBuilder operator fun invoke(...)` on `ChildrenBuilder`. */
 internal fun IrSimpleFunction.isElementBuilder(): Boolean =
     name.asString() == "invoke" && allOverridden(includeSelf = true).any { it.hasAnnotation(ELEMENT_BUILDER) }
@@ -79,3 +88,9 @@ internal fun IrSimpleFunction.isChildrenBuilderMember(
     this.name.asString() == name &&
         parameters.size == arity &&
         allOverridden(includeSelf = true).any { it.parentClassOrNull?.symbol == symbols.childrenBuilderClass }
+
+/** Whether [this] call creates a React component (`FC`, `@ComponentWrapper`, `memo`, `forwardRef`, `lazy`). */
+internal fun IrCall.createsComponent(symbols: ReactSymbols): Boolean =
+    symbol in symbols.componentFactories ||
+        symbol.owner.isComponentWrapper() ||
+        symbol.owner.fqNameWhenAvailable in COMPONENT_FACTORIES
