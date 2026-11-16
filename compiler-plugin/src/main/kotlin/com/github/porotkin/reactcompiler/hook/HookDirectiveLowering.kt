@@ -2,7 +2,7 @@ package com.github.porotkin.reactcompiler.hook
 
 import com.github.porotkin.reactcompiler.ReactLowering
 import com.github.porotkin.reactcompiler.ReactSymbols
-import com.github.porotkin.reactcompiler.any
+import com.github.porotkin.reactcompiler.callsUnloweredHook
 import com.github.porotkin.reactcompiler.irUseMemo
 import com.github.porotkin.reactcompiler.isHookName
 import com.github.porotkin.reactcompiler.isUseMemo
@@ -12,7 +12,6 @@ import org.jetbrains.kotlin.ir.declarations.IrFile
 import org.jetbrains.kotlin.ir.declarations.IrFunction
 import org.jetbrains.kotlin.ir.declarations.IrSimpleFunction
 import org.jetbrains.kotlin.ir.expressions.IrBlockBody
-import org.jetbrains.kotlin.ir.expressions.IrCall
 import org.jetbrains.kotlin.ir.visitors.transformChildrenVoid
 
 /** Prepends `"use memo"` to top-level custom hooks so React Compiler compiles them in `annotation` mode. */
@@ -30,14 +29,13 @@ internal class HookDirectiveLowering(
     }
 
     /**
-     * A top-level, non-inline, non-suspend `use*` function. One that calls `useMemo(*deps)` / `useCallback(*deps)`,
-     * which [HookCallLowering] leaves as is, is excluded: React Compiler rejects a dependency list that is not an
-     * array literal.
+     * A top-level, non-inline, non-suspend `use*` function. One that calls a kotlin-react hook the hook lowerings left
+     * as is, such as `useMemo(*deps)`, is excluded: React Compiler rejects a dependency list that is not an array literal.
      */
     private fun IrSimpleFunction.isCustomHook(body: IrBlockBody): Boolean =
         parent is IrFile &&
             !isInline &&
             !isSuspend &&
             name.isHookName() &&
-            !body.any { it is IrCall && it.symbol in symbols.rawHooks }
+            !body.callsUnloweredHook(symbols)
 }

@@ -2,6 +2,7 @@ package com.github.porotkin.reactcompiler.component
 
 import com.github.porotkin.reactcompiler.ReactSymbols
 import com.github.porotkin.reactcompiler.any
+import com.github.porotkin.reactcompiler.callsUnloweredHook
 import com.github.porotkin.reactcompiler.isHookName
 import org.jetbrains.kotlin.descriptors.DescriptorVisibilities
 import org.jetbrains.kotlin.ir.declarations.IrFile
@@ -59,7 +60,7 @@ internal class ComponentHelpers(
     fun resolve(helper: IrSimpleFunctionSymbol): IrSimpleFunctionSymbol {
         val (_, lowered, items) = helpers.getValue(helper)
         if (rewritten.add(helper)) {
-            val memoize = lowered.name.isHookName() && !lowered.any { it is IrCall && it.symbol in symbols.rawHooks }
+            val memoize = lowered.name.isHookName() && !lowered.callsUnloweredHook(symbols)
             rewrite(lowered, lowered.parameters.first(), items, memoize)
         }
         return lowered.symbol

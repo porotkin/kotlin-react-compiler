@@ -87,6 +87,7 @@ internal class TestProject(
             write("$STUBS_MODULE/src/jsMain/kotlin/ReactRawStubs.kt", REACT_RAW_STUBS)
             write("$STUBS_MODULE/src/jsMain/kotlin/ReactJsxStubs.kt", REACT_JSX_STUBS)
             write("$STUBS_MODULE/src/jsMain/kotlin/ReactHookStubs.kt", REACT_HOOK_STUBS)
+            write("$STUBS_MODULE/src/jsMain/kotlin/ReactInternalStubs.kt", REACT_INTERNAL_STUBS)
             write("$STUBS_MODULE/src/jsMain/kotlin/ReactUseStubs.kt", REACT_USE_STUBS)
         }
         write(
@@ -429,6 +430,14 @@ private val REACT_HOOK_STUBS =
 
     fun <T> use(context: Context<T>): T =
         js("null").unsafeCast<T>()
+    """.trimIndent() + "\n"
+
+private val REACT_INTERNAL_STUBS =
+    """
+    package react.internal
+
+    fun createCleanupCallback(block: suspend () -> Unit): () -> () -> Unit =
+        { {} }
     """.trimIndent() + "\n"
 
 private val REACT_USE_STUBS =

@@ -189,4 +189,67 @@ class HookLoweringTest : PluginTest() {
             "Expected inline bound formatter.format call in:\n$mjs"
         )
     }
+
+    @Test
+    fun `lowers synchronous and suspending effects to direct React effect calls without Unit returns`() {
+        val mjs = compile(
+            """
+            var sideEffectLog = ""
+
+            suspend fun suspendStep() {}
+
+            fun makeEffect(title: String): suspend () -> Unit = { sideEffectLog += title }
+
+            @Suppress("REACT_GLOBALS")
+            fun useEffects(title: String) {
+                val ref = useRef<String>(null)
+                useEffect {
+                    sideEffectLog += "every;"
+                }
+                useEffectOnce {
+                    if (sideEffectLog.isEmpty()) return@useEffectOnce
+                    sideEffectLog += "once;"
+                }
+                useEffect(title.trim()) {
+                    ref.current = title
+                }
+                useLayoutEffect(title) {
+                    suspendStep()
+                    ref.current = title
+                }
+                useEffect(title, effect = makeEffect(title))
+            }
+            """,
+        )
+
+        val useEffectsBody = mjs.substringAfter("function useEffects(").substringBefore("\n}")
+        assertTrue(
+            Regex("""import \{\s*useEffect as useEffect,\s*useLayoutEffect as useLayoutEffect,?\s*\} from 'react'""") in mjs,
+            "Expected direct React effect imports in:\n$mjs"
+        )
+        assertFalse(
+            "Unit_getInstance" in useEffectsBody,
+            "Expected no Unit_getInstance() return in useEffects body:\n$useEffectsBody"
+        )
+        assertTrue(
+            Regex("""useEffect\(function \(\) \{[^}]*return undefined;\s*\}\);""") in mjs,
+            "Expected 1-arg synchronous useEffect returning undefined in:\n$mjs"
+        )
+        assertTrue(
+            Regex("""useEffect\(function \(\) \{[\s\S]*?once;[\s\S]*?return undefined;\s*\}, \[\]\);""") in mjs,
+            "Expected useEffectOnce lowered with [] and undefined return in:\n$mjs"
+        )
+        assertTrue(
+            Regex("""var (dep\w*) = toString\(trim\([^\n]+\)\);\s+useEffect\(function \(\) \{\s+ref\.current = title;\s+return undefined;\s+\}, \[\1\]\);""") in mjs,
+            "Expected hoisted dep and direct ref write in synchronous useEffect in:\n$mjs"
+        )
+        assertTrue(
+            Regex("""useLayoutEffect\(function \(\) \{\s+return createCleanupCallback\([^\n]+\)\(\);\s+\}, \[title\]\);""") in mjs,
+            "Expected suspending effect wrapped via createCleanupCallback inside inline callback in:\n$mjs"
+        )
+        assertTrue(
+            Regex("""var (effect\w*) = makeEffect\(title\);\s+useEffect\(function \(\) \{\s+return createCleanupCallback\(\1\)\(\);\s+\}, \[title\]\);""") in mjs,
+            "Expected a non-lambda effect evaluated during render, before the call, in:\n$mjs"
+        )
+    }
 }

@@ -19,6 +19,7 @@ import org.jetbrains.kotlin.name.Name
 private val KOTLIN = FqName("kotlin")
 private val KOTLIN_JS = FqName("kotlin.js")
 private val REACT = FqName("react")
+private val REACT_INTERNAL = FqName("react.internal")
 private val REACT_RAW = FqName("react.raw")
 private val REACT_USE = FqName("react.use")
 private val JSX_RUNTIME = FqName("react.jsx.runtime")
@@ -28,6 +29,12 @@ private val PROPS_WITH_CHILDREN = classId(REACT, "PropsWithChildren")
 private val FRAGMENT_PROPS = classId(REACT, "FragmentProps")
 private val FC = classId(REACT, "FC")
 private val REACT_MARKERS = listOf(PROPS, FC, FRAGMENT_PROPS)
+
+/** React's own effect hook a kotlin-react one calls; `*Once` variants pass it an empty dependency array. */
+internal class EffectTarget(
+    val raw: IrSimpleFunctionSymbol,
+    val runOnce: Boolean,
+)
 
 /** `StateInstance` and what `val (value, setValue) = state` reads: `component1()`, `component2()` and `setValue(value)`. */
 internal class StateDelegate(
@@ -65,6 +72,10 @@ internal class ReactSymbols private constructor(
         .findFunctions(CallableId(classId(KOTLIN, "Char"), Name.identifier("toString")))
         .singleOrNull { it.owner.parameters.size == 1 }
         ?: missing("kotlin.Char.toString")
+    val function0Invoke: IrSimpleFunctionSymbol = finder
+        .findFunctions(CallableId(classId(KOTLIN, "Function0"), Name.identifier("invoke")))
+        .singleOrNull { it.owner.parameters.size == 1 }
+        ?: missing("kotlin.Function0.invoke")
     val childrenSetter = finder
         .findProperties(CallableId(PROPS_WITH_CHILDREN, Name.identifier("children")))
         .singleOrNull()?.owner?.setter?.symbol
@@ -89,6 +100,19 @@ internal class ReactSymbols private constructor(
             it.owner.typeParameters.singleOrNull()?.superTypes?.any { type -> type.classFqName == FqName("kotlin.Function") } == true
         },
     ).flatMap { (sources, target) -> sources.map { it to target } }.toMap()
+
+    /** kotlin-react `useEffect` / `useEffectOnce`, and their layout and insertion kinds, mapped to React's own hook. */
+    val effectHooks: Map<IrSimpleFunctionSymbol, EffectTarget> =
+        listOf("useEffect", "useLayoutEffect", "useInsertionEffect").flatMap { name ->
+            val raw = function(REACT_COMPILER, name)
+            finder.findFunctions(callable(REACT, name)).map { it to EffectTarget(raw, runOnce = false) } +
+                finder.findFunctions(callable(REACT, "${name}Once")).map { it to EffectTarget(raw, runOnce = true) }
+        }.toMap()
+
+    /** `react.internal.createCleanupCallback(block)` when present on the classpath (real kotlin-react). */
+    val createCleanupCallback: IrSimpleFunctionSymbol? = finder
+        .findFunctions(callable(REACT_INTERNAL, "createCleanupCallback"))
+        .singleOrNull { it.owner.parameters.size == 1 && it.owner.typeParameters.isEmpty() }
 
     /** `by useRefValue()`, and `by useLatest()` of kotlin-react-use: delegates that read and write a ref's `current`. */
     val refDelegates: List<IrClassSymbol> =

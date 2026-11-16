@@ -34,6 +34,7 @@ class ReactRuntimeTest : PluginTest() {
 
                 package app
 
+                import js.coroutines.awaitCancellation
                 import lib.Memoized
                 import react.*
 
@@ -52,12 +53,16 @@ class ReactRuntimeTest : PluginTest() {
                 private val button: ElementType<ButtonProps> = "button".unsafeCast<ElementType<ButtonProps>>()
 
                 var footerRenders = 0
+                var effectHistory = ""
+                var unmountCleanups = 0
 
                 class Formatter(val sep: String) {
                     fun format(label: String, count: Int): String = "${'$'}label${'$'}sep${'$'}count"
                 }
 
                 fun defaultSeparator(): String = ":"
+
+                value class Tag(val raw: String)
 
                 private fun ChildrenBuilder.Heading(title: String) {
                     span { +title }
@@ -69,13 +74,29 @@ class ReactRuntimeTest : PluginTest() {
                     b { +title }
                 }
 
+                @Suppress("REACT_GLOBALS")
                 private fun ChildrenBuilder.InnerCounter(label: String) {
                     var count by useState(0)
+                    var commits by useRefValue(0)
+                    var lastTag by useRefValue(Tag("none"))
                     val sep = useMemo(callback = ::defaultSeparator)
                     val suffix = useMemo { "" }
                     val formatter = useMemo(sep) { Formatter(sep) }
                     val formatCount = useCallback(formatter, callback = formatter::format)
                     val text = useMemo(label, count, formatCount, suffix) { formatCount(label, count) + suffix }
+
+                    useEffect(label, count) {
+                        commits += 1
+                        effectHistory += "${'$'}label=${'$'}count#${'$'}commits<${'$'}{lastTag.raw};"
+                        lastTag = Tag("${'$'}label${'$'}count")
+                    }
+
+                    useEffectOnce {
+                        awaitCancellation {
+                            unmountCleanups += 1
+                        }
+                    }
+
                     button {
                         onClick = { count += 1 }
                         +text
@@ -103,6 +124,12 @@ class ReactRuntimeTest : PluginTest() {
 
                 @JsExport
                 fun footerRenderCount(): Int = footerRenders
+
+                @JsExport
+                fun recordedEffects(): String = effectHistory
+
+                @JsExport
+                fun cleanupCount(): Int = unmountCleanups
                 """,
                 "lib",
             )
@@ -151,9 +178,12 @@ class ReactRuntimeTest : PluginTest() {
               container.querySelector('button').click();
             });
             counterStates.push(container.innerHTML);
+            const cleanupsBeforeUnmount = m.cleanupCount();
 
             await act(async () => root.unmount());
-            console.log(JSON.stringify({ compiled, consoleErrors, steps, footerBeforeUnrelated, footerAfterUnrelated, counterStates }));
+            const effects = m.recordedEffects();
+            const cleanupsAfterUnmount = m.cleanupCount();
+            console.log(JSON.stringify({ compiled, consoleErrors, steps, footerBeforeUnrelated, footerAfterUnrelated, counterStates, effects, cleanupsBeforeUnmount, cleanupsAfterUnmount }));
             """.trimIndent(),
         )
 
@@ -162,7 +192,10 @@ class ReactRuntimeTest : PluginTest() {
         assertTrue("useOuterCounter" in output, "Expected OuterCounter transitive hook helper compiled by React Compiler in:\n$output")
         assertFalse(""""Heading"""" in output, "Expected non-hook Heading helper not compiled with its own cache in:\n$output")
         assertFalse(""""Footer"""" in output, "Expected non-hook Footer helper not compiled with its own cache in:\n$output")
-        assertTrue(""""consoleErrors":[]""" in output, "Expected no React console errors or duplicate key warnings in:\n$output")
+        assertTrue(
+            """"consoleErrors":[]""" in output,
+            "Expected no React console errors, effect return warnings, or duplicate key warnings in:\n$output"
+        )
         assertTrue(
             """"steps":["<span>A</span><b>A</b>","<b>B</b>","<span>B</span><b>B</b>","<span>B</span><b>B</b>"]""" in output,
             "Expected conditional helper not to corrupt sibling helper cache across renders in:\n$output",
@@ -174,6 +207,14 @@ class ReactRuntimeTest : PluginTest() {
         assertTrue(
             """"counterStates":["<button>clicks:0</button>","<button>clicks:1</button>"]""" in output,
             "Expected hook-calling lowered helper to preserve and update state in React 19 in:\n$output",
+        )
+        assertTrue(
+            """"effects":"clicks=0#1<none;clicks=1#2<clicks0;"""" in output,
+            "Expected lowered synchronous useEffect and useRefValue delegate to track commits across state updates in:\n$output",
+        )
+        assertTrue(
+            """"cleanupsBeforeUnmount":0,"cleanupsAfterUnmount":1""" in output,
+            "Expected lowered suspending useEffectOnce with awaitCancellation to run cleanup on unmount in:\n$output",
         )
     }
 

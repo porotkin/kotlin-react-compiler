@@ -69,6 +69,10 @@ internal fun IrPluginContext.noLifting(
     function.annotations += DeclarationIrBuilder(this, function.symbol).irAnnotation(symbols.jsNoLifting)
 }
 
+/** Whether this calls a kotlin-react hook the hook lowerings left as is, e.g. one spreading its dependencies. */
+internal fun IrElement.callsUnloweredHook(symbols: ReactSymbols): Boolean =
+    any { it is IrCall && (it.symbol in symbols.rawHooks || it.symbol in symbols.effectHooks) }
+
 /** React Compiler's opt-in directive: in `annotation` mode it only compiles functions that start with it. */
 private const val USE_MEMO = "\"use memo\""
 

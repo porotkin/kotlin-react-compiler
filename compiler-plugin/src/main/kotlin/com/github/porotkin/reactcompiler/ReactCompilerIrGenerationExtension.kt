@@ -2,6 +2,7 @@ package com.github.porotkin.reactcompiler
 
 import com.github.porotkin.reactcompiler.component.ComponentLowering
 import com.github.porotkin.reactcompiler.hook.DelegateLowering
+import com.github.porotkin.reactcompiler.hook.EffectHookLowering
 import com.github.porotkin.reactcompiler.hook.HookCallLowering
 import com.github.porotkin.reactcompiler.hook.HookDirectiveLowering
 import com.github.porotkin.reactcompiler.lint.LintConfig
@@ -40,6 +41,7 @@ class ReactCompilerIrGenerationExtension internal constructor(
         listOf(
             DelegateLowering(pluginContext, symbols),
             HookCallLowering(pluginContext, symbols),
+            EffectHookLowering(pluginContext, symbols),
             HookDirectiveLowering(pluginContext, symbols),
             ComponentLowering(pluginContext, symbols, reporter),
         ).forEach { it.lower(moduleFragment) }
