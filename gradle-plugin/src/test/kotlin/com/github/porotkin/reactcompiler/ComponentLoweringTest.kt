@@ -102,7 +102,9 @@ class ComponentLoweringTest : PluginTest() {
             """
             'use memo'; <- val Card: FC<Props> = FC { props ->
             var dep = props.get_key(); <- val label = useMemo(props.key) { "label" }
-            var label = useMemoRaw(Card${'$'}lambda${'$'}lambda, [dep]); <- val label = useMemo(props.key) { "label" }
+            var label = useMemoRaw(function () { <- val label = useMemo(props.key) { "label" }
+            return 'label'; <- val label = useMemo(props.key) { "label" }
+            }, [dep]); <- val label = useMemo(props.key) { "label" }
             var type = get_div(); <- div {
             var type_0 = get_span(); <- span {
             var attrs = {}; <- span {

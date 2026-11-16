@@ -60,6 +60,10 @@ internal class ReactSymbols private constructor(
         .findConstructors(classId(REACT_COMPILER, "Stamped"))
         .singleOrNull()
         ?: missing("$REACT_COMPILER.Stamped")
+    val jsNoLifting: IrConstructorSymbol = finder
+        .findConstructors(classId(KOTLIN_JS, "JsNoLifting"))
+        .singleOrNull()
+        ?: missing("$KOTLIN_JS.JsNoLifting")
 
     /** `FC { props -> }` overloads, whose single lambda argument is a component body. */
     val componentFactories: Set<IrSimpleFunctionSymbol> =

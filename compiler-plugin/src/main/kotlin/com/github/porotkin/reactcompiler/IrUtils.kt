@@ -60,6 +60,15 @@ internal fun IrPluginContext.stamp(
 internal fun IrSimpleFunction.isStamped(): Boolean =
     hasAnnotation(STAMPED)
 
+/** Marks [function] `@JsNoLifting`, so Kotlin/JS emits it where it is written even when it captures nothing. */
+internal fun IrPluginContext.noLifting(
+    function: IrSimpleFunction,
+    symbols: ReactSymbols,
+) {
+    if (function.annotations.any { it.symbol == symbols.jsNoLifting }) return
+    function.annotations += DeclarationIrBuilder(this, function.symbol).irAnnotation(symbols.jsNoLifting)
+}
+
 /** React Compiler's opt-in directive: in `annotation` mode it only compiles functions that start with it. */
 private const val USE_MEMO = "\"use memo\""
 

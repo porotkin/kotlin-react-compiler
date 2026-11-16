@@ -7,14 +7,18 @@ import org.junit.jupiter.api.Test
 
 class HookLoweringTest : PluginTest() {
     @Test
-    fun `passes an empty dependency array to a useMemo without dependencies`() {
+    fun `passes an empty dependency array and inline callback to a contextless useMemo`() {
         val mjs = compile(
             """
             fun useHeader(): String = useMemo { "Results" }
             """,
         )
 
-        assertTrue("useMemoRaw(useHeader\$lambda, [])" in mjs, "Expected empty dependency array in:\n$mjs")
+        assertTrue(
+            Regex("""useMemoRaw\(function \(\) \{\s+return 'Results';\s+\}, \[\]\)""") in mjs,
+            "Expected inline callback and empty dependency array in:\n$mjs"
+        )
+        assertFalse("useHeader\$lambda" in mjs, "Expected contextless hook callback not lifted in:\n$mjs")
     }
 
     @Test

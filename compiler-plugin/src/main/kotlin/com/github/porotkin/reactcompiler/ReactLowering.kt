@@ -27,4 +27,8 @@ internal abstract class ReactLowering(
         source: IrElement,
     ): DeclarationIrBuilder =
         DeclarationIrBuilder(context, symbol, source.startOffset, source.endOffset)
+
+    /** [builder] in the scope being transformed. */
+    protected fun builder(source: IrElement): DeclarationIrBuilder =
+        builder(currentScope!!.scope.scopeOwnerSymbol, source)
 }
