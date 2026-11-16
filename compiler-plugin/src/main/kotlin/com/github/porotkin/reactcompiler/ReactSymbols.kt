@@ -47,8 +47,8 @@ internal class ReactSymbols private constructor(
     val childrenSetter = finder
         .findProperties(CallableId(classId(REACT, "PropsWithChildren"), Name.identifier("children")))
         .single().owner.setter!!.symbol
-    val eagerInitialization: IrConstructorSymbol = finder
-        .findConstructors(classId(KOTLIN_JS, "EagerInitialization"))
+    val stamped: IrConstructorSymbol = finder
+        .findConstructors(classId(REACT_COMPILER, "Stamped"))
         .single()
 
     /** `FC { props -> }` overloads, whose single lambda argument is a component body. */

@@ -38,12 +38,12 @@ internal fun Name.isHookName(): Boolean =
 internal fun Name.isComponentName(): Boolean =
     !isSpecial && asString().first().isUpperCase()
 
-private val EAGER_INITIALIZATION = FqName("kotlin.js.EagerInitialization")
+private val STAMPED = FqName("com.github.porotkin.reactcompiler.Stamped")
 
 /**
  * Records in `.klib` metadata that the plugin checked [function]. A compilation that gets the function from metadata
  * (another module, or an incremental build of this one) sees no body to check, so it trusts [isStamped] instead.
- * The stamp is `@kotlin.js.EagerInitialization`: it targets properties, so source code cannot put it on a function.
+ * The stamp is the `annotations` artifact's internal `@Stamped`, which source code outside it cannot apply.
  */
 internal fun IrPluginContext.stamp(
     function: IrSimpleFunction,
@@ -52,13 +52,13 @@ internal fun IrPluginContext.stamp(
     if (function.isStamped()) return
     metadataDeclarationRegistrar.addMetadataVisibleAnnotationsToElement(
         function,
-        listOf(DeclarationIrBuilder(this, function.symbol).irAnnotation(symbols.eagerInitialization)),
+        listOf(DeclarationIrBuilder(this, function.symbol).irAnnotation(symbols.stamped)),
     )
 }
 
 /** Whether the plugin checked this function where it was compiled, see [stamp]. */
 internal fun IrSimpleFunction.isStamped(): Boolean =
-    hasAnnotation(EAGER_INITIALIZATION)
+    hasAnnotation(STAMPED)
 
 /** React Compiler's opt-in directive: in `annotation` mode it only compiles functions that start with it. */
 private const val USE_MEMO = "\"use memo\""

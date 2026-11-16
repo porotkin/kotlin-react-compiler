@@ -232,7 +232,7 @@ writable property on the element's `PropsWithChildren` type, and that the body o
 assigning each parameter to the matching prop and calling `block()`. Lowered call sites emit typed calls to the verified
 `Props` setters (preserving `@JsName` and Kotlin property mangling).
 
-For cross-module calls, the plugin records a synthetic `@kotlin.js.EagerInitialization` stamp on verified `invoke`
-functions in `.klib` metadata (which user code cannot apply to a function because `@EagerInitialization` targets
-properties). Downstream modules only trust external `@ElementWrapper` declarations carrying this stamp, so declarations
-from modules compiled without the plugin are never lowered.
+For cross-module calls, the plugin records a synthetic internal `@Stamped` annotation from the `annotations` artifact
+on verified `invoke` functions in `.klib` metadata (which user code outside `annotations` cannot apply). Downstream
+modules only trust external `@ElementWrapper` declarations carrying this stamp, so declarations from modules compiled
+without the plugin are never lowered.
