@@ -1,5 +1,6 @@
 package com.github.porotkin.reactcompiler.lint
 
+import org.jetbrains.kotlin.descriptors.InlineClassRepresentation
 import org.jetbrains.kotlin.ir.IrElement
 import org.jetbrains.kotlin.ir.declarations.IrDeclarationParent
 import org.jetbrains.kotlin.ir.declarations.IrFile
@@ -16,12 +17,15 @@ import org.jetbrains.kotlin.ir.expressions.IrTypeOperatorCall
 import org.jetbrains.kotlin.ir.expressions.IrVararg
 import org.jetbrains.kotlin.ir.symbols.IrSimpleFunctionSymbol
 import org.jetbrains.kotlin.ir.symbols.IrSymbol
+import org.jetbrains.kotlin.ir.types.IrType
+import org.jetbrains.kotlin.ir.types.classOrNull
 import org.jetbrains.kotlin.ir.util.fqNameWhenAvailable
 import org.jetbrains.kotlin.ir.util.isGetter
 import org.jetbrains.kotlin.ir.visitors.IrVisitorVoid
 import org.jetbrains.kotlin.ir.visitors.acceptChildrenVoid
 import org.jetbrains.kotlin.ir.visitors.acceptVoid
 import org.jetbrains.kotlin.name.FqName
+import org.jetbrains.kotlin.name.Name
 
 /**
  * [LintRule.REACT_EXHAUSTIVE_DEPS], after `exhaustive-deps` of React's linter: the dependencies of a hook name every
@@ -142,9 +146,15 @@ internal class ExhaustiveDeps(
                     }
                     symbol.owner.isGetter -> {
                         val receiver = receiver() ?: return null
-                        // As in React's linter, what a callback depends on in `ref.current` is the ref.
-                        val property = symbol.owner.correspondingPropertySymbol!!.owner.name.asString()
-                        if (lint.isRefAccess(this)) receiver.path(scope) else receiver.path(scope)?.plus(property)
+                        val path = receiver.path(scope) ?: return null
+                        val property = symbol.owner.correspondingPropertySymbol!!.owner.name
+                        when {
+                            // As in React's linter, what a callback depends on in `ref.current` is the ref.
+                            lint.isRefAccess(this) -> path
+                            // Seskar unwraps a value class into its underlying property in dependencies: the two are one value.
+                            property == receiver.type.underlyingPropertyName() -> path
+                            else -> path + property.asString()
+                        }
                     }
                     else -> null
                 }
@@ -185,6 +195,10 @@ internal class ExhaustiveDeps(
         reporter.report(LintRule.REACT_EXHAUSTIVE_DEPS, file, callback, message)
     }
 }
+
+/** The property a value class wraps: `value` of `value class Priority(val value: Int)`. */
+private fun IrType.underlyingPropertyName(): Name? =
+    (classOrNull?.owner?.valueClassRepresentation as? InlineClassRepresentation<*>)?.underlyingPropertyName
 
 /** Whether this is the `vararg dependencies` parameter of the function around it. */
 private fun IrExpression.isOwnDependencies(): Boolean =

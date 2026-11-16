@@ -10,10 +10,15 @@ class HookUsageLintTest : LintTest() {
             """
             val div: ElementType<FragmentProps> = "div".unsafeCast<ElementType<FragmentProps>>()
 
+            value class Priority(val value: Int) {
+                val group: Int get() = value shr 8
+            }
+
             interface ItemProps : Props {
                 var title: String
                 var items: List<String>
                 var filter: (String) -> Boolean
+                var priority: Priority
             }
 
             fun useStore(): List<String> = emptyList()
@@ -37,12 +42,16 @@ class HookUsageLintTest : LintTest() {
                 // Neither does a local delegated to a ref.
                 val onFilter by react.use.useLatest(props.filter)
                 val isShown = useCallback { item: String -> onFilter(item) }
+                // A value class and its underlying property (as Seskar unwraps it in dependencies) are the same value.
+                val priority = props.priority
+                val group = useMemo(priority.value) { priority.group }
+                useEffect(priority.value) { println(priority) }
                 // A dependency that is an expression covers the values it mentions.
                 val size = useMemo(store.size > 0) { store.size }
                 // Without dependencies an effect runs after every render.
                 useEffect { println(title) }
                 useEffect(title, store) { println("${'$'}title ${'$'}store") }
-                div { +"${'$'}filtered ${'$'}byProps ${'$'}label ${'$'}onClick ${'$'}isShown ${'$'}size" }
+                div { +"${'$'}filtered ${'$'}byProps ${'$'}label ${'$'}onClick ${'$'}isShown ${'$'}group ${'$'}size" }
             }
 
             val Incomplete: FC<ItemProps> = FC { props ->
@@ -53,13 +62,14 @@ class HookUsageLintTest : LintTest() {
                 val filtered = useMemo(props.items) { props.items.filter(props.filter) } // ? REACT_EXHAUSTIVE_DEPS
                 val label = useMemo { "${'$'}{props.title} ${'$'}count" } // ? REACT_EXHAUSTIVE_DEPS
                 val onClick = useCallback(store) { setCount(count + 1) } // ? REACT_EXHAUSTIVE_DEPS
+                val wrongField = useMemo(props.priority.group) { props.priority.value } // ? REACT_EXHAUSTIVE_DEPS
                 val onRename = useCallback { name = "renamed" }
                 useEffect(count) { // ? REACT_EXHAUSTIVE_DEPS
                     println("${'$'}name ${'$'}store")
                     println("${'$'}name again")
                 }
                 useEffectOnce { println(count) } // ? REACT_EXHAUSTIVE_DEPS
-                div { +"${'$'}filtered ${'$'}label ${'$'}onClick ${'$'}onRename" }
+                div { +"${'$'}filtered ${'$'}label ${'$'}onClick ${'$'}wrongField ${'$'}onRename" }
             }
 
             fun useSize(vararg items: String): Int =
