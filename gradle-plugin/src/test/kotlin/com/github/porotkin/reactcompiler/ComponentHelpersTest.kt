@@ -79,6 +79,10 @@ class ComponentHelpersTest : PluginTest() {
         assertTrue("useOuter(props)" in mjs.substringAfter("function View\$lambda(props)"), "Expected View to call useOuter in:\n$mjs")
         assertTrue("function Plain(props)" in mjs, "Expected helper without hooks to keep its name in:\n$mjs")
         assertTrue("function useHeader(props)" in mjs, "Expected helper already named as a hook to keep its name in:\n$mjs")
+        assertTrue(isLowered(mjs, "useInner"), "Expected hook helper useInner to receive 'use memo' in:\n$mjs")
+        assertTrue(isLowered(mjs, "useOuter"), "Expected transitive hook helper useOuter to receive 'use memo' in:\n$mjs")
+        assertTrue(isLowered(mjs, "useHeader"), "Expected hook-named helper useHeader to receive 'use memo' in:\n$mjs")
+        assertFalse(isLowered(mjs, "Plain"), "Expected non-hook helper Plain not to receive 'use memo' in:\n$mjs")
     }
 
     @Test
@@ -94,16 +98,23 @@ class ComponentHelpersTest : PluginTest() {
             fun escape(builder: ChildrenBuilder) {}
 
             val LoweredCaller: FC<ItemProps> = FC { props ->
+                SharedHook(props)
                 Shared(props)
             }
 
             val UnloweredCaller: FC<ItemProps> = FC { props ->
                 escape(this)
+                SharedHook(props)
                 Shared(props)
             }
 
             private fun ChildrenBuilder.Shared(props: ItemProps) {
                 span { +props.title }
+            }
+
+            private fun ChildrenBuilder.SharedHook(props: ItemProps) {
+                val title = useMemo(props.title.length) { props.title }
+                span { +title }
             }
             """,
         )
@@ -111,6 +122,8 @@ class ComponentHelpersTest : PluginTest() {
         assertFalse("throwIrLinkageError" in mjs, "Expected no linkage error when helper is shared with unlowered caller in:\n$mjs")
         assertTrue(Regex("""function Shared\([\w$]+, props\)""") in mjs, "Expected original 2-arg helper kept for unlowered caller in:\n$mjs")
         assertTrue("function Shared\$lowered(props)" in mjs, "Expected cloned 1-arg helper emitted for lowered caller in:\n$mjs")
+        assertFalse(isLowered(mjs, "Shared\$lowered"), "Expected non-hook cloned helper not to receive 'use memo' in:\n$mjs")
+        assertTrue(isLowered(mjs, "useSharedHook\$lowered"), "Expected hook-calling cloned helper to be named as a hook and receive 'use memo' in:\n$mjs")
         assertTrue("Shared\$lowered(props)" in mjs, "Expected LoweredCaller to call Shared\$lowered in:\n$mjs")
         assertTrue("Shared(\$this\$FC, props)" in mjs, "Expected UnloweredCaller to call original Shared in:\n$mjs")
     }

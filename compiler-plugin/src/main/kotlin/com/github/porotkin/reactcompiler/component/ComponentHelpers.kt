@@ -22,9 +22,9 @@ import org.jetbrains.kotlin.name.Name
  */
 internal class ComponentHelpers(
     private val file: IrFile,
-    symbols: ReactSymbols,
+    private val symbols: ReactSymbols,
     /** Lowers a body read by [analyzer]: drops its builder parameter and writes the items back. */
-    private val rewrite: (IrSimpleFunction, IrValueParameter, List<Item>) -> Unit,
+    private val rewrite: (IrSimpleFunction, IrValueParameter, List<Item>, Boolean) -> Unit,
 ) {
     private val helpers: Map<IrSimpleFunctionSymbol, Helper>
     private val rewritten = mutableSetOf<IrSimpleFunctionSymbol>()
@@ -47,19 +47,26 @@ internal class ComponentHelpers(
             }
         } while (candidates.size < count)
         helpers = candidates.associateBy { it.original.symbol }
+        nameHooks()
         analyzer = ComponentAnalyzer(symbols, helpers.keys)
     }
 
-    /** The lowered copy of [helper], written on its first call. */
+    /**
+     * The lowered copy of [helper], written on its first call. Only hook helpers get `"use memo"`: non-hook helpers
+     * keep their name so a caller may call them conditionally without shifting React Compiler's hook-order cache, while
+     * the caller itself memoizes the call on its arguments.
+     */
     fun resolve(helper: IrSimpleFunctionSymbol): IrSimpleFunctionSymbol {
         val (_, lowered, items) = helpers.getValue(helper)
-        if (rewritten.add(helper)) rewrite(lowered, lowered.parameters.first(), items)
+        if (rewritten.add(helper)) {
+            val memoize = lowered.name.isHookName() && !lowered.any { it is IrCall && it.symbol in symbols.rawHooks }
+            rewrite(lowered, lowered.parameters.first(), items, memoize)
+        }
         return lowered.symbol
     }
 
     /**
-     * Puts each lowered copy in the file, in place of its original or, while the original is still called, next to it,
-     * and gives the copies that call hooks a hook name.
+     * Puts each lowered copy in the file, in place of its original or, while the original is still called, next to it.
      */
     fun install() {
         for (symbol in rewritten) {
@@ -67,13 +74,12 @@ internal class ComponentHelpers(
             val index = file.declarations.indexOf(original)
             val stillCalled = file.declarations.any { it != original && it.any { e -> e is IrCall && e.symbol == symbol } }
             if (stillCalled) {
-                lowered.name = Name.identifier("${original.name}\$lowered")
+                lowered.name = Name.identifier("${lowered.name}\$lowered")
                 file.declarations.add(index + 1, lowered)
             } else {
                 file.declarations[index] = lowered
             }
         }
-        nameHooks()
     }
 
     /**
@@ -81,12 +87,14 @@ internal class ComponentHelpers(
      * recognizes by a `use` name. Under any other name it memoizes the call on its arguments: a re-render from the
      * copy's own state or a context then skips its hooks and React drops their state. Copies without hooks keep their
      * name, so a caller may still call them conditionally. Renaming to a fixed point covers hooks reached through
-     * other copies.
+     * other copies, before [resolve] decides whether [rewrite] should emit `"use memo"`.
      */
     private fun nameHooks() {
-        val pending = rewritten.map { helpers.getValue(it).lowered }.filterTo(mutableListOf()) { !it.name.isHookName() }
+        val pending = helpers.values.map { it.lowered }.filterTo(mutableListOf()) { !it.name.isHookName() }
         do {
-            val hooks = pending.filter { copy -> copy.any { it is IrCall && it.symbol.owner.name.isHookName() } }
+            val hooks = pending.filter { copy ->
+                copy.any { it is IrCall && (helpers[it.symbol]?.lowered ?: it.symbol.owner).name.isHookName() }
+            }
             for (hook in hooks) {
                 hook.name = Name.identifier("use" + hook.name.asString().replaceFirstChar(Char::uppercaseChar))
             }

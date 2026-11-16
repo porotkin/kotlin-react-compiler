@@ -93,7 +93,8 @@ internal class ComponentLowering(
         fn: IrSimpleFunction,
         builderParameter: IrValueParameter,
         items: List<Item>,
+        memoize: Boolean = true,
     ) {
-        ComponentEmitter(fn, symbols, builder(fn.symbol, fn), fileEntry, helpers::resolve).rewrite(builderParameter, items)
+        ComponentEmitter(fn, symbols, builder(fn.symbol, fn), fileEntry, helpers::resolve).rewrite(builderParameter, items, memoize)
     }
 }

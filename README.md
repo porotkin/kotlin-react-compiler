@@ -49,7 +49,7 @@ executable too.
     return jsx(h1, attrs, '@rdk/1_4');
   }
   ```
-- **Component helpers:** `private fun ChildrenBuilder.Foo(...)` functions returning `Unit` that a lowered component calls are lowered the same way when their bodies can be. The lowered copy drops the `ChildrenBuilder` receiver and replaces the original, or is added next to it as `Foo$lowered` while other code still calls the original. A lowered helper that calls hooks is renamed `useFoo`: React Compiler recognizes hooks only by name and would otherwise memoize the call and drop its hooks' state. Recursive helpers are not lowered.
+- **Component helpers:** `private fun ChildrenBuilder.Foo(...)` functions returning `Unit` that a lowered component calls are lowered the same way when their bodies can be. The lowered copy drops the `ChildrenBuilder` receiver and replaces the original, or is added next to it as `Foo$lowered` while other code still calls the original. A lowered helper that calls hooks is renamed `useFoo` and gets `"use memo"`: React Compiler recognizes hooks only by name and would otherwise memoize the call and drop its hooks' state. Helpers without hooks keep their name and get no directive, so their caller memoizes the call on its arguments and may call them conditionally. Recursive helpers are not lowered.
 
   ```kotlin
   private fun ChildrenBuilder.Header(props: TitleProps) {

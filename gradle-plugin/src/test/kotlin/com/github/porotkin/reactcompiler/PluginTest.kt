@@ -52,8 +52,9 @@ abstract class PluginTest {
     }
 
     /**
-     * Whether the function [name] of [mjs] is lowered: its body then starts with the directive. Its parameters do not
-     * tell, because the stub `FC` is inline and a component left as it was takes just `props` too.
+     * Whether the component or hook [name] of [mjs] is lowered for React Compiler: its body then starts with the
+     * directive. Its parameters do not tell, because the stub `FC` is inline and a component left as it was takes just
+     * `props` too.
      */
     protected fun isLowered(
         mjs: String,

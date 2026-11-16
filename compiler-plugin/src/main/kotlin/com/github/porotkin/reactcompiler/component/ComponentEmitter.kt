@@ -54,9 +54,9 @@ import org.jetbrains.kotlin.ir.visitors.IrElementTransformerVoid
 import org.jetbrains.kotlin.ir.visitors.transformChildrenVoid
 
 /**
- * Writes an analyzed body back as IR for [fn]: `"use memo"`, the [Plain] statements in order, each element as a
- * `jsx(type, attrs, key)` (or, with several children, `jsxs`) call bound to a local, and a `return` of the root node. Calls to helpers go to the
- * lowered helper [resolveHelper] returns.
+ * Writes an analyzed body back as IR for [fn]: `"use memo"` when [fn] is a component or a hook helper, the [Plain]
+ * statements in order, each element as a `jsx(type, attrs, key)` (or, with several children, `jsxs`) call bound to a
+ * local, and a `return` of the root node. Calls to helpers go to the lowered helper [resolveHelper] returns.
  *
  * The nodes built for a piece of the body take its position in the file ([at]), so source maps lead from the
  * generated code back to it.
@@ -77,10 +77,12 @@ internal class ComponentEmitter(
     fun rewrite(
         builderParameter: IrValueParameter,
         items: List<Item>,
+        memoize: Boolean = true,
     ) {
         fn.parameters -= builderParameter
         fn.returnType = symbols.reactNode
-        val out = mutableListOf<IrStatement>(b.irUseMemo(symbols))
+        val out = mutableListOf<IrStatement>()
+        if (memoize) out += b.irUseMemo(symbols)
         out += returnNode(items.filterNot { it is Plain && it.statement.isUseMemo(symbols) }, out)
         val substitute = object : IrElementTransformerVoid() {
             override fun visitGetValue(expression: IrGetValue): IrExpression =
