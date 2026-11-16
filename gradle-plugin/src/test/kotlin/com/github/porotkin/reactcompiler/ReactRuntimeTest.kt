@@ -342,8 +342,18 @@ class ReactRuntimeTest : PluginTest() {
 
     @Test
     fun `keys children from different files apart when they share a line and column in React 19`() {
-        TestProject(dir, realReact = true).apply {
-            // `b` in Panel and `i` in Page both start at line 14, column 8 of their files.
+        assertCrossFileChildrenKeyedApart(seskar = false)
+    }
+
+    @Test
+    fun `keys children from different files apart when Seskar keys them by line and column in React 19`() {
+        assertCrossFileChildrenKeyedApart(seskar = true)
+    }
+
+    private fun assertCrossFileChildrenKeyedApart(seskar: Boolean) {
+        TestProject(dir, realReact = true, seskar = seskar).apply {
+            // `b` in Panel and `i` in Page both start at line 14, column 8 of their files: the plugin keys them by it,
+            // or, with Seskar, Seskar does.
             module(
                 "lib",
                 """

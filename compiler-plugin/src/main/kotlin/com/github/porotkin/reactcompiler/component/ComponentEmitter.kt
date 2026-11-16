@@ -278,7 +278,7 @@ internal class ComponentEmitter(
         val out = mutableListOf<IrStatement>()
         val type = stable(child.type, "type", out)
         val props = stable(child.props, "props", out)
-        out += jsx(type, props, child.propsType, child.defaultKey)
+        out += jsx(type, props, child.propsType, qualified(child.defaultKey))
         return block(out)
     }
 
@@ -334,7 +334,7 @@ internal class ComponentEmitter(
             emit(item, out, children)
         }
         setChildren(attrs.value, children, out)
-        val key = children.key ?: element.defaultKey ?: sourceKey(element.call).takeUnless { repeated }
+        val key = children.key ?: qualified(element.defaultKey) ?: sourceKey(element.call).takeUnless { repeated }
         out += jsx(type, b.irGet(attrs.value), attrsType, key, children.static)
         return block(out)
     }
@@ -465,8 +465,19 @@ internal class ComponentEmitter(
         return b.irString("@rdk/$fileId/${entry.getLineNumber(call.startOffset)}_${entry.getColumnNumber(call.startOffset)}")
     }
 
+    /**
+     * Seskar's default key, `"@rdk/<line>_<col>"` of the element, with the file part [sourceKey] adds: Seskar keys an
+     * element by its position in its own file, which repeats across files just as a source key would.
+     */
+    private fun qualified(defaultKey: IrExpression?): IrExpression? {
+        val position = ((defaultKey as? IrConst)?.value as? String)?.let(SESKAR_KEY::matchEntire)?.groupValues?.get(1)
+        return if (position != null) b.irString("@rdk/$fileId/$position") else defaultKey
+    }
+
     private val fileId by lazy { "${file.packageFqName}/${file.fileEntry.name.substringAfterLast('/')}".hashCode().toUInt().toString(36) }
 }
+
+private val SESKAR_KEY = Regex("""@rdk/(\d+_\d+)""")
 
 /**
  * What a list of items adds, and in an element body the explicit `key`: its child [nodes] in order, or, with a [list],

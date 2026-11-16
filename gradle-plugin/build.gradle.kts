@@ -88,5 +88,6 @@ tasks.test {
     systemProperty("pluginVersion", "$version")
     systemProperty("kotlinVersion", libs.versions.kotlin.get())
     systemProperty("kotlinReactVersion", libs.versions.kotlinWrappers.get())
+    systemProperty("seskarVersion", libs.versions.seskar.get())
     systemProperty("testNodeDir", testNodeBuildDir.get().asFile.absolutePath)
 }

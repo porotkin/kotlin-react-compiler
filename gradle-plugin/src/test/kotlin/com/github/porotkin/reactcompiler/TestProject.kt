@@ -9,6 +9,8 @@ internal class TestProject(
     private val kotlinVersion: String = System.getProperty("kotlinVersion"),
     private val externalProps: Boolean = false,
     private val realReact: Boolean = false,
+    /** Applies Seskar before the plugin, as a kotlin-react project does: Seskar keys elements by source position. */
+    private val seskar: Boolean = false,
 ) {
     private val repository = System.getProperty("testRepository")
 
@@ -40,7 +42,8 @@ internal class TestProject(
         }
         val annotations = if (applyPlugin) emptyList() else listOf("implementation(\"$ANNOTATIONS_MODULE:$pluginVersion\")")
         val dependencies = (listOf(reactDependency) + dependsOn.map { "implementation(project(\":$it\"))" } + annotations).joinToString("; ")
-        val pluginsBlock = if (applyPlugin) "plugins {\n    id(\"$pluginId\")\n}\n" else ""
+        val seskarPlugin = if (seskar) "    id(\"$SESKAR_PLUGIN_ID\")\n" else ""
+        val pluginsBlock = if (applyPlugin) "plugins {\n$seskarPlugin    id(\"$pluginId\")\n}\n" else ""
         write(
             "$name/build.gradle.kts",
             """
@@ -107,12 +110,14 @@ internal class TestProject(
             plugins {
                 kotlin("multiplatform") version "$kotlinVersion" apply false
                 id("$pluginId") version "$pluginVersion" apply false
+                ${if (seskar) "id(\"$SESKAR_PLUGIN_ID\") version \"${System.getProperty("seskarVersion")}\" apply false" else ""}
             }
             subprojects {
                 apply(plugin = "org.jetbrains.kotlin.multiplatform")
                 extensions.configure<org.jetbrains.kotlin.gradle.dsl.KotlinMultiplatformExtension> {
                     compilerOptions {
-                        freeCompilerArgs.addAll("-Xverify-ir=error")
+                        // Seskar passes one receiver node to both `setDefaultKey` and the element call it keys
+                        freeCompilerArgs.addAll("-Xverify-ir=${if (seskar) "none" else "error"}")
                     }
                     js {
                         browser()
@@ -134,6 +139,8 @@ internal class TestProject(
 }
 
 private const val STUBS_MODULE = "react-stubs"
+
+private const val SESKAR_PLUGIN_ID = "io.github.turansky.seskar"
 
 private const val ANNOTATIONS_MODULE = "io.github.porotkin.reactcompiler:annotations"
 
