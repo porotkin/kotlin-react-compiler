@@ -1,6 +1,7 @@
 package com.github.porotkin.reactcompiler.lint
 
 import org.jetbrains.kotlin.backend.common.extensions.DeclarationFinder
+import org.jetbrains.kotlin.ir.expressions.IrCall
 import org.jetbrains.kotlin.ir.symbols.IrClassSymbol
 import org.jetbrains.kotlin.ir.types.IrType
 import org.jetbrains.kotlin.ir.util.isSubtypeOfClass
@@ -30,6 +31,10 @@ internal class LintSymbols(
     private val stateSetter = finder.reactClass("StateSetter")
 
     fun isRef(type: IrType): Boolean = type.isA(refObject)
+
+    /** `ref.current`, read or assigned. */
+    fun isRefAccess(call: IrCall): Boolean =
+        call.symbol.owner.correspondingPropertySymbol?.owner?.name?.asString() == "current" && call.receiver()?.type?.let(::isRef) == true
 
     fun isRefValue(type: IrType): Boolean = type.isA(refValue)
 

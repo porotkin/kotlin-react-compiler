@@ -144,7 +144,7 @@ internal class ExhaustiveDeps(
                         val receiver = receiver() ?: return null
                         // As in React's linter, what a callback depends on in `ref.current` is the ref.
                         val property = symbol.owner.correspondingPropertySymbol!!.owner.name.asString()
-                        if (property == "current" && lint.isRef(receiver.type)) receiver.path(scope) else receiver.path(scope)?.plus(property)
+                        if (lint.isRefAccess(this)) receiver.path(scope) else receiver.path(scope)?.plus(property)
                     }
                     else -> null
                 }

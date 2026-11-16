@@ -228,7 +228,7 @@ internal class RenderRules(
         val comparison = this as? IrCall ?: return null
         if (comparison.symbol != builtIns.eqeqSymbol && comparison.symbol != builtIns.eqeqeqSymbol) return null
         val read = comparison.arguments[0] as? IrCall ?: return null
-        if ((comparison.arguments[1] as? IrConst)?.value != null || !read.isRefAccess()) return null
+        if ((comparison.arguments[1] as? IrConst)?.value != null || !lint.isRefAccess(read)) return null
         val ref = (read.receiver() as? IrGetValue)?.symbol ?: return null
         initializationChecks += read
         return ref
@@ -468,7 +468,7 @@ internal class RenderRules(
         val local = delegated[call.symbol]
         val name = when {
             local != null -> local.name.takeIf { lint.isRefValue(local.delegate?.type ?: return) } ?: return
-            !call.isRefAccess() || call in initializationChecks -> return
+            !lint.isRefAccess(call) || call in initializationChecks -> return
             (call.receiver() as? IrGetValue)?.symbol in initializedRefs -> return
             else -> "current"
         }
@@ -478,17 +478,11 @@ internal class RenderRules(
         report(LintRule.REACT_REFS, call, "Ref value `$name` is $access during render. $advice.")
     }
 
-    /** `ref.current`, read or assigned. */
-    private fun IrCall.isRefAccess(): Boolean {
-        val property = symbol.owner.correspondingPropertySymbol?.owner ?: return false
-        return property.name.asString() == "current" && receiver()?.type?.let(lint::isRef) == true
-    }
-
     /** Whether the value of this expression comes from a ref. */
     private fun IrElement.readsRef(): Boolean =
         any {
             it is IrGetValue && it.symbol in readFromRefs ||
-                it is IrCall && (it.isRefAccess() || delegated[it.symbol]?.delegate?.type?.let(lint::isRefValue) == true)
+                it is IrCall && (lint.isRefAccess(it) || delegated[it.symbol]?.delegate?.type?.let(lint::isRefValue) == true)
         }
 
     override fun visitPropertyReference(expression: IrPropertyReference) {
