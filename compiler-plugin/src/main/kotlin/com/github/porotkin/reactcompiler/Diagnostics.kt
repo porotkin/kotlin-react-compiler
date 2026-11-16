@@ -9,6 +9,7 @@ import org.jetbrains.kotlin.diagnostics.errorWithoutSource
 import org.jetbrains.kotlin.diagnostics.infoWithoutSource
 import org.jetbrains.kotlin.diagnostics.rendering.BaseDiagnosticRendererFactory
 import org.jetbrains.kotlin.diagnostics.rendering.BaseSourcelessDiagnosticRendererFactory
+import org.jetbrains.kotlin.diagnostics.warningWithoutSource
 import org.jetbrains.kotlin.ir.IrElement
 import org.jetbrains.kotlin.ir.declarations.IrFile
 
@@ -19,6 +20,11 @@ internal fun IrPluginContext.reportError(
     message: String,
 ) {
     report(ReactCompilerDiagnostics.REACT_COMPILER_ERROR, file, at, message)
+}
+
+/** Warns with [message] when a module-wide precondition prevents the plugin from lowering. */
+internal fun IrPluginContext.reportWarning(message: String) {
+    diagnosticReporter.report(ReactCompilerDiagnostics.REACT_COMPILER_WARNING, message, null)
 }
 
 /** Notes [message] at the position of [at] in [file]; Gradle prints it when run with `--info`. */
@@ -48,6 +54,7 @@ private fun IrPluginContext.report(
 
 private object ReactCompilerDiagnostics : KtDiagnosticsContainer() {
     val REACT_COMPILER_ERROR by errorWithoutSource()
+    val REACT_COMPILER_WARNING by warningWithoutSource()
     val REACT_COMPILER_INFO by infoWithoutSource()
 
     override fun getRendererFactory(): BaseDiagnosticRendererFactory = Messages
@@ -55,6 +62,7 @@ private object ReactCompilerDiagnostics : KtDiagnosticsContainer() {
     object Messages : BaseSourcelessDiagnosticRendererFactory() {
         override val MAP by KtDiagnosticFactoryToRendererMap("ReactCompiler") { map ->
             map.put(REACT_COMPILER_ERROR, MESSAGE_PLACEHOLDER)
+            map.put(REACT_COMPILER_WARNING, MESSAGE_PLACEHOLDER)
             map.put(REACT_COMPILER_INFO, MESSAGE_PLACEHOLDER)
         }
     }

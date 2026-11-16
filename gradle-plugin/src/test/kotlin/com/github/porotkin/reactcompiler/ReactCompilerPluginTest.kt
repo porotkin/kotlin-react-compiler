@@ -1,7 +1,10 @@
 package com.github.porotkin.reactcompiler
 
+import org.gradle.testkit.runner.GradleRunner
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import java.io.File
 
 class ReactCompilerPluginTest : PluginTest() {
     @Test
@@ -63,5 +66,37 @@ class ReactCompilerPluginTest : PluginTest() {
         }
 
         assertTrue("not 2.4.10, and may fail." in project.run(":app:help").output)
+    }
+
+    @Test
+    fun `warns and skips lowering instead of crashing when a kotlin-react declaration is missing`() {
+        val project = TestProject(dir).apply {
+            module(
+                "app",
+                """
+                package app
+
+                import react.*
+
+                val View: FC<Props> = FC { _ -> }
+                """,
+            )
+        }
+        // Write the project first via a no-op help run, then simulate kotlin-react drift by removing `react.raw.useMemoRaw`.
+        project.run(":help")
+        File(dir, "react-stubs/src/jsMain/kotlin/ReactRawStubs.kt").writeText("package react.raw\n")
+
+        val output = GradleRunner.create()
+            .withProjectDir(dir)
+            .withArguments(":app:compileDevelopmentExecutableKotlinJs", "--stacktrace")
+            .build()
+            .output
+
+        assertTrue(
+            "Kotlin React Compiler skipped lowering: declaration 'react.raw.useMemoRaw' was not found on the classpath" in output,
+            "Expected missing-declaration warning in:\n$output",
+        )
+        val mjs = dir.walkTopDown().first { it.name.endsWith("-app.mjs") }.readText()
+        assertFalse("'use memo';" in mjs, "Expected lowering skipped cleanly in:\n$mjs")
     }
 }

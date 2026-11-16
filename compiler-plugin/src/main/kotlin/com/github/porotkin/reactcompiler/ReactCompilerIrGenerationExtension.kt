@@ -33,7 +33,7 @@ class ReactCompilerIrGenerationExtension internal constructor(
         if (!pluginContext.platform.isJs()) return
         val file = moduleFragment.files.firstOrNull() ?: return
         val finder = pluginContext.finderForSource(file)
-        val symbols = ReactSymbols.resolve(finder) ?: return
+        val symbols = ReactSymbols.resolve(finder, pluginContext) ?: return
         val reporter = LintReporter(pluginContext, lint)
         ReactLint(symbols, LintSymbols(finder), reporter, pluginContext.irBuiltIns).check(moduleFragment)
         listOf(

@@ -1,6 +1,7 @@
 package com.github.porotkin.reactcompiler
 
 import org.jetbrains.kotlin.backend.common.extensions.DeclarationFinder
+import org.jetbrains.kotlin.backend.common.extensions.IrPluginContext
 import org.jetbrains.kotlin.ir.symbols.IrClassSymbol
 import org.jetbrains.kotlin.ir.symbols.IrConstructorSymbol
 import org.jetbrains.kotlin.ir.symbols.IrSimpleFunctionSymbol
@@ -19,7 +20,11 @@ private val REACT = FqName("react")
 private val REACT_RAW = FqName("react.raw")
 private val JSX_RUNTIME = FqName("react.jsx.runtime")
 private val REACT_COMPILER = FqName("com.github.porotkin.reactcompiler")
+private val PROPS = classId(REACT, "Props")
+private val PROPS_WITH_CHILDREN = classId(REACT, "PropsWithChildren")
 private val FRAGMENT_PROPS = classId(REACT, "FragmentProps")
+private val FC = classId(REACT, "FC")
+private val REACT_MARKERS = listOf(PROPS, FC, FRAGMENT_PROPS)
 
 /** The kotlin-react, React runtime and Kotlin/JS declarations the lowerings reference. */
 internal class ReactSymbols private constructor(
@@ -33,23 +38,27 @@ internal class ReactSymbols private constructor(
 
     /** React's `jsxs`, declared in the annotations artifact the Gradle plugin adds: kotlin-react's is internal. */
     val jsxs = function(REACT_COMPILER, "jsxs")
-    val fragment = finder.findProperties(callable(REACT, "Fragment")).single().owner.getter!!.symbol
+    val fragment = finder.findProperties(callable(REACT, "Fragment")).singleOrNull()?.owner?.getter?.symbol
+        ?: missing("$REACT.Fragment")
     val fragmentProps = classType(FRAGMENT_PROPS)
     val reactNode = classType(classId(REACT, "ReactNode")).makeNullable()
-    val propsClass = classSymbol(classId(REACT, "Props"))
-    val propsWithChildrenClass = classSymbol(classId(REACT, "PropsWithChildren"))
+    val propsClass = classSymbol(PROPS)
+    val propsWithChildrenClass = classSymbol(PROPS_WITH_CHILDREN)
     val childrenBuilderClass = classSymbol(classId(REACT, "ChildrenBuilder"))
     val elementTypeClass = classSymbol(classId(REACT, "ElementType"))
-    val fcClass = classSymbol(classId(REACT, "FC"))
+    val fcClass = classSymbol(FC)
     val charToString: IrSimpleFunctionSymbol = finder
         .findFunctions(CallableId(classId(KOTLIN, "Char"), Name.identifier("toString")))
-        .single { it.owner.parameters.size == 1 }
+        .singleOrNull { it.owner.parameters.size == 1 }
+        ?: missing("kotlin.Char.toString")
     val childrenSetter = finder
-        .findProperties(CallableId(classId(REACT, "PropsWithChildren"), Name.identifier("children")))
-        .single().owner.setter!!.symbol
+        .findProperties(CallableId(PROPS_WITH_CHILDREN, Name.identifier("children")))
+        .singleOrNull()?.owner?.setter?.symbol
+        ?: missing("${PROPS_WITH_CHILDREN.asFqNameString()}.children")
     val stamped: IrConstructorSymbol = finder
         .findConstructors(classId(REACT_COMPILER, "Stamped"))
-        .single()
+        .singleOrNull()
+        ?: missing("$REACT_COMPILER.Stamped")
 
     /** `FC { props -> }` overloads, whose single lambda argument is a component body. */
     val componentFactories: Set<IrSimpleFunctionSymbol> =
@@ -59,7 +68,7 @@ internal class ReactSymbols private constructor(
     val rawHooks: Map<IrSimpleFunctionSymbol, IrSimpleFunctionSymbol> = listOf(
         functions(REACT, "useMemo") to function(REACT_RAW, "useMemoRaw"),
         functions(REACT, "useCallback") to function(REACT_RAW, "useCallbackRaw") {
-            it.owner.typeParameters.single().superTypes.any { type -> type.classFqName == FqName("kotlin.Function") }
+            it.owner.typeParameters.singleOrNull()?.superTypes?.any { type -> type.classFqName == FqName("kotlin.Function") } == true
         },
     ).flatMap { (sources, target) -> sources.map { it to target } }.toMap()
 
@@ -85,13 +94,34 @@ internal class ReactSymbols private constructor(
             .ifEmpty { missing("$packageName.$name") }
 
     private fun missing(name: String): Nothing =
-        error("React Compiler IR plugin: missing $name")
+        throw MissingSymbolException(name)
 
     companion object {
-        /** Returns `null` when kotlin-react is not on the classpath, i.e. there is nothing to lower. */
-        fun resolve(finder: DeclarationFinder): ReactSymbols? =
-            if (finder.findClass(FRAGMENT_PROPS) == null) null else ReactSymbols(finder)
+        /**
+         * Returns `null` when kotlin-react is not on the classpath, or reports a warning and returns `null` when a
+         * declaration the plugin needs is missing from the kotlin-react or annotations version on the classpath.
+         */
+        fun resolve(
+            finder: DeclarationFinder,
+            context: IrPluginContext,
+        ): ReactSymbols? {
+            if (REACT_MARKERS.all { finder.findClass(it) == null }) return null
+            return try {
+                ReactSymbols(finder)
+            } catch (e: MissingSymbolException) {
+                context.reportWarning(
+                    "Kotlin React Compiler skipped lowering: declaration '${e.symbol}' was not found on the classpath (incompatible kotlin-react version?).",
+                )
+                null
+            }
+        }
     }
+}
+
+private class MissingSymbolException(
+    val symbol: String,
+) : Exception(symbol) {
+    override fun fillInStackTrace(): Throwable = this
 }
 
 private fun callable(
