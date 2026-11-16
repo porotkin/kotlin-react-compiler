@@ -62,7 +62,8 @@ internal class ReactSymbols private constructor(
     val fragment = finder.findProperties(callable(REACT, "Fragment")).singleOrNull()?.owner?.getter?.symbol
         ?: missing("$REACT.Fragment")
     val fragmentProps = classType(FRAGMENT_PROPS)
-    val reactNode = classType(classId(REACT, "ReactNode")).makeNullable()
+    val reactNodeClass = classSymbol(classId(REACT, "ReactNode"))
+    val reactNode = reactNodeClass.owner.defaultType.makeNullable()
     val propsClass = classSymbol(PROPS)
     val propsWithChildrenClass = classSymbol(PROPS_WITH_CHILDREN)
     val childrenBuilderClass = classSymbol(classId(REACT, "ChildrenBuilder"))

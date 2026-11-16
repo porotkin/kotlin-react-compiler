@@ -1,11 +1,11 @@
 package com.github.porotkin.reactcompiler.lint
 
 import com.github.porotkin.reactcompiler.ReactSymbols
-import com.github.porotkin.reactcompiler.buildsChildren
 import com.github.porotkin.reactcompiler.isComponentFunction
 import com.github.porotkin.reactcompiler.isHookName
 import com.github.porotkin.reactcompiler.isOnBuilder
 import com.github.porotkin.reactcompiler.optsOutOfMemo
+import com.github.porotkin.reactcompiler.rendersComponent
 import org.jetbrains.kotlin.ir.declarations.IrDeclarationParent
 import org.jetbrains.kotlin.ir.declarations.IrFunction
 import org.jetbrains.kotlin.ir.declarations.IrLocalDelegatedProperty
@@ -49,10 +49,9 @@ internal class RenderScope(
             declaration.isComponentFunction(symbols) -> Scope.COMPONENT
             else -> Scope.OTHER
         }
-        // A capitalized function is a component by its name only, so it is held to the rules of render only if it takes props.
         val renders = when (scope) {
             Scope.HOOK -> true
-            Scope.COMPONENT -> declaration.buildsChildren(symbols) || declaration.parameters.any { it.type.isSubtypeOfClass(symbols.propsClass) }
+            Scope.COMPONENT -> declaration.rendersComponent(symbols)
             else -> false
         }
         return Frame(scope, declaration, renders, declaration.optsOutOfMemo(symbols))

@@ -39,6 +39,12 @@ class RenderLintTest : LintTest() {
             fun useLength(ref: RefObject<String>): Int =
                 ref.current?.length ?: 0 // ! REACT_REFS
 
+            private fun DirectBadge(): ReactNode {
+                val ref = useRef<String>()
+                val current = ref.current // ! REACT_REFS
+                return current.unsafeCast<ReactNode>()
+            }
+
             val Reference: FC<ListProps> = FC {
                 val ref = useRef<String>()
                 val getter = ref::current // ! REACT_REFS

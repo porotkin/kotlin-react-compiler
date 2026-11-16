@@ -12,7 +12,9 @@ import org.jetbrains.kotlin.ir.types.IrSimpleType
 import org.jetbrains.kotlin.ir.types.IrType
 import org.jetbrains.kotlin.ir.types.IrTypeProjection
 import org.jetbrains.kotlin.ir.types.classOrNull
+import org.jetbrains.kotlin.ir.types.isNothing
 import org.jetbrains.kotlin.ir.types.isUnit
+import org.jetbrains.kotlin.ir.types.makeNotNull
 import org.jetbrains.kotlin.ir.util.allOverridden
 import org.jetbrains.kotlin.ir.util.fqNameWhenAvailable
 import org.jetbrains.kotlin.ir.util.hasAnnotation
@@ -87,6 +89,15 @@ internal fun IrFunction.buildsChildren(symbols: ReactSymbols): Boolean =
 /** Whether [this] named function is a component or `ChildrenBuilder` helper, as opposed to a hook or factory. */
 internal fun IrSimpleFunction.isComponentFunction(symbols: ReactSymbols): Boolean =
     !name.isHookName() && !returnsComponent(symbols) && (buildsChildren(symbols) || name.isComponentName())
+
+/**
+ * Whether a component function is known to run during render, rather than being capitalized by Kotlin factory
+ * convention alone: it builds children, takes `Props`, or returns `ReactNode`.
+ */
+internal fun IrSimpleFunction.rendersComponent(symbols: ReactSymbols): Boolean =
+    buildsChildren(symbols) ||
+        parameters.any { it.type.isSubtypeOfClass(symbols.propsClass) } ||
+        !returnType.isNothing() && returnType.makeNotNull().isSubtypeOfClass(symbols.reactNodeClass)
 
 /** Whether [this] call is made on a `ChildrenBuilder`: as its member, its extension, or in its context. */
 internal fun IrCall.isOnBuilder(symbols: ReactSymbols): Boolean =
