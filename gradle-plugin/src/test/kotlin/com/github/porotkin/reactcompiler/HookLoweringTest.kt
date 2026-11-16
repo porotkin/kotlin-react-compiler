@@ -270,8 +270,8 @@ class HookLoweringTest : PluginTest() {
             "Expected useEffectOnce lowered with [] and undefined return in:\n$mjs"
         )
         assertTrue(
-            Regex("""var (dep\w*) = toString\(trim\([^\n]+\)\);\s+useEffect\(function \(\) \{\s+ref\.current = title;\s+return undefined;\s+\}, \[\1\]\);""") in mjs,
-            "Expected hoisted dep and direct ref write in synchronous useEffect in:\n$mjs"
+            Regex("""var (dep\w*) = toString\(trim\([^\n]+\)\);\s+useEffect\(function \(\) \{\s+mutableValue\w*\(ref\)\.current = title;\s+return undefined;\s+\}, \[\1\]\);""") in mjs,
+            "Expected hoisted dep and the ref written through mutableValue in synchronous useEffect in:\n$mjs"
         )
         assertTrue(
             Regex("""useLayoutEffect\(function \(\) \{\s+return createCleanupCallback\([^\n]+\)\(\);\s+\}, \[title\]\);""") in mjs,

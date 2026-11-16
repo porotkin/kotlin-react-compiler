@@ -489,6 +489,145 @@ class ReactRuntimeTest : PluginTest() {
         assertTrue(""""html":"<div><i>forwarded</i><b>own</b></div>"""" in output, "Expected both children rendered in:\n$output")
     }
 
+    @Test
+    fun `lets effects write to values React does not own in React 19`() {
+        TestProject(dir, realReact = true).apply {
+            module(
+                "app",
+                """
+                @file:OptIn(kotlin.js.ExperimentalJsExport::class)
+                @file:Suppress("REACT_ONLY_EXPORT_COMPONENTS")
+
+                package app
+
+                import com.github.porotkin.reactcompiler.Mutable
+                import react.*
+
+                @Mutable
+                open class Counter {
+                    var count = 0
+                }
+
+                class Clicks : Counter()
+
+                external interface CounterProps : Props {
+                    var counter: Counter
+                    var holder: RefObject<Counter>
+                    var value: Int
+                }
+
+                fun useSyncCount(counter: Counter, value: Int) {
+                    useEffect(value) {
+                        counter.count = value
+                    }
+                }
+
+                fun useHold(holder: RefObject<Counter>, counter: Counter) {
+                    useEffect(counter) {
+                        holder.current = counter
+                    }
+                }
+
+                fun useAddOverOne(counter: Counter, value: Int) {
+                    useEffect(value) {
+                        try {
+                            counter.count += value.takeIf { it > 1 } ?: 0
+                        } catch (_: Throwable) {
+                        }
+                    }
+                }
+
+                val Shown: FC<CounterProps> = FC { props ->
+                    val clicks = useMemo { Clicks() }
+                    useSyncCount(props.counter, props.value)
+                    useAddOverOne(props.counter, props.value)
+                    useHold(props.holder, clicks)
+                }
+
+                @JsExport
+                fun shown(): Any = Shown
+
+                @JsExport
+                fun counter(): Any = Counter()
+
+                @JsExport
+                fun countOf(counter: Any): Int = counter.unsafeCast<Counter>().count
+                """,
+            )
+        }.run(":app:compileDevelopmentExecutableKotlinJs")
+
+        val output = runWithReactCompiler(
+            "app",
+            """
+            const container = document.createElement('div');
+            document.body.appendChild(container);
+            const root = createRoot(container);
+            const counter = m.counter();
+            const holder = { current: null };
+            const counts = [];
+            for (const value of [2, 5]) {
+              await act(async () => {
+                root.render(React.createElement(m.shown(), { counter, holder, value }));
+                await new Promise((resolve) => setTimeout(resolve, 0));
+              });
+              counts.push(m.countOf(counter));
+            }
+            counts.push(holder.current === null ? -1 : m.countOf(holder.current));
+            console.log(JSON.stringify({ compiled, consoleErrors, counts }));
+            """.trimIndent(),
+        )
+
+        for (name in listOf("useSyncCount", "useAddOverOne", "useHold", "Shown\$lambda")) {
+            assertTrue(name in output, "Expected $name compiled by React Compiler in:\n$output")
+        }
+        assertTrue(""""consoleErrors":[]""" in output, "Expected no console errors in:\n$output")
+        // The synchronous effect writes `value`, the one with `try` (a coroutine) adds it when over 1, the ref gets `clicks`.
+        assertTrue(""""counts":[4,10,0]""" in output, "Expected the writes made by the effects in:\n$output")
+    }
+
+    @Test
+    fun `reads only the receivers of callback writes to mutable values through mutableValue`() {
+        TestProject(dir, realReact = true).apply {
+            module(
+                "app",
+                """
+                package app
+
+                import com.github.porotkin.reactcompiler.Mutable
+                import react.*
+
+                @Mutable
+                class Counter {
+                    var count = 0
+                }
+
+                class Plain {
+                    var count = 0
+                }
+
+                fun useCounters(counter: Counter, plain: Plain): Counter {
+                    counter.count = 1
+                    useEffect(plain) {
+                        plain.count = 2
+                    }
+                    useEffect(counter) {
+                        counter.count = 3
+                    }
+                    return useMemo(counter) { Counter().apply { count = 4 } }
+                }
+                """,
+                // The render-time write would fail the build; it is here to show it is left as it is.
+                configuration = """reactCompiler { lint { off("REACT_IMMUTABILITY") } }""",
+            )
+        }.run(":app:compileDevelopmentExecutableKotlinJs")
+
+        val mjs = dir.walkTopDown().first { it.name.endsWith("-app.mjs") }.readText()
+        val writes = Regex("""(\S+)\.count_\w+ = (\d)""").findAll(mjs).associate { it.groupValues[2] to it.groupValues[1] }
+        assertEquals(mapOf("1" to "counter", "2" to "plain"), writes.filterKeys { it == "1" || it == "2" }, "Expected render and plain writes left as they are in:\n$mjs")
+        assertFalse(writes.getValue("4").startsWith("mutableValue"), "Expected the write to a counter useMemo creates left as it is in:\n$mjs")
+        assertTrue(Regex("""mutableValue\w*\(counter\)""") in mjs, "Expected the effect's write to read counter through mutableValue in:\n$mjs")
+    }
+
     /**
      * Copies the compiled `.mjs` bundle for [module] into a working directory under `testNodeDir`, compiles the
      * module with `babel-plugin-react-compiler` (`annotation` mode, React 19 target), and runs [script] in Node with
@@ -592,6 +731,18 @@ class ReactRuntimeTest : PluginTest() {
                             }
                             if (moduleName.endsWith('/react/jsx/runtime/jsx.mjs')) {
                               return { kind: 'object', properties: { '*': jsxFunction } };
+                            }
+                            // `mutableValue()`, alone in its file (per-file output) and in the annotations module
+                            if (moduleName.endsWith('/reactcompiler/MutableValue.mjs') || moduleName.endsWith('_reactcompiler_annotations.mjs')) {
+                              const mutableValue = {
+                                kind: 'function',
+                                positionalParams: ['read'],
+                                restParam: null,
+                                calleeEffect: 'read',
+                                returnType: { kind: 'type', name: 'Any' },
+                                returnValueKind: 'global',
+                              };
+                              return { kind: 'object', properties: { '*': mutableValue } };
                             }
                             return null;
                           },

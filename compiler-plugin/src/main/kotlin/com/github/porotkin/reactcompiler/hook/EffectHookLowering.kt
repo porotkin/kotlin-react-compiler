@@ -20,6 +20,7 @@ import org.jetbrains.kotlin.ir.expressions.IrFunctionReference
 import org.jetbrains.kotlin.ir.expressions.IrGetObjectValue
 import org.jetbrains.kotlin.ir.expressions.IrGetValue
 import org.jetbrains.kotlin.ir.expressions.IrReturn
+import org.jetbrains.kotlin.ir.expressions.IrTry
 import org.jetbrains.kotlin.ir.expressions.IrVararg
 import org.jetbrains.kotlin.ir.symbols.IrSimpleFunctionSymbol
 import org.jetbrains.kotlin.ir.types.isUnit
@@ -112,12 +113,17 @@ internal class EffectHookLowering(
     }
 }
 
-/** Whether an effect lambda neither suspends nor uses its `CoroutineScope` receiver, so it can run directly as `() -> Any?`. */
+/**
+ * Whether an effect lambda neither suspends nor uses its `CoroutineScope` receiver, so it can run directly as
+ * `() -> Any?`. One with a `try` runs as a coroutine, as kotlin-react's does, which React Compiler sees only as a call:
+ * React Compiler 1.0 does not compile a component or hook with a conditional, `?:` or `?.` value inside a `try` ("Todo").
+ */
 private fun IrSimpleFunction.isSynchronousEffect(): Boolean {
     val body = body as? IrBlockBody ?: return false
     val parameters = parameters.mapTo(hashSetOf()) { it.symbol }
     return !body.any {
-        it is IrGetValue && it.symbol in parameters ||
+        it is IrTry ||
+            it is IrGetValue && it.symbol in parameters ||
             it is IrCall && it.symbol.owner.isSuspend ||
             it is IrFunctionReference && (it.symbol.owner as? IrSimpleFunction)?.isSuspend == true ||
             it is IrFunctionExpression && it.function.isSuspend

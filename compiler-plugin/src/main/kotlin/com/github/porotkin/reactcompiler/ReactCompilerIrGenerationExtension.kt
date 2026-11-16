@@ -5,6 +5,7 @@ import com.github.porotkin.reactcompiler.hook.DelegateLowering
 import com.github.porotkin.reactcompiler.hook.EffectHookLowering
 import com.github.porotkin.reactcompiler.hook.HookCallLowering
 import com.github.porotkin.reactcompiler.hook.HookDirectiveLowering
+import com.github.porotkin.reactcompiler.hook.MutableWriteLowering
 import com.github.porotkin.reactcompiler.lint.LintConfig
 import com.github.porotkin.reactcompiler.lint.LintReporter
 import com.github.porotkin.reactcompiler.lint.ReactLint
@@ -20,6 +21,7 @@ import org.jetbrains.kotlin.platform.isJs
  * The linter runs first, on the code as it was written. Hook passes run before [ComponentLowering] so a component
  * body is analyzed with its hook calls already in their final form, the same order a single post-order traversal
  * gives.
+ * [MutableWriteLowering] runs last: it rewrites only functions that start with `"use memo"`, which the passes before it add.
  */
 class ReactCompilerIrGenerationExtension internal constructor(
     private val lint: LintConfig,
@@ -43,6 +45,7 @@ class ReactCompilerIrGenerationExtension internal constructor(
             EffectHookLowering(pluginContext, symbols),
             HookDirectiveLowering(pluginContext, symbols),
             ComponentLowering(pluginContext, symbols, reporter),
+            MutableWriteLowering(pluginContext, symbols),
         ).forEach { it.lower(moduleFragment) }
     }
 }

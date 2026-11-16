@@ -2,15 +2,19 @@ package com.github.porotkin.reactcompiler
 
 import org.jetbrains.kotlin.backend.common.extensions.DeclarationFinder
 import org.jetbrains.kotlin.backend.common.extensions.IrPluginContext
+import org.jetbrains.kotlin.ir.declarations.IrClass
 import org.jetbrains.kotlin.ir.symbols.IrClassSymbol
 import org.jetbrains.kotlin.ir.symbols.IrConstructorSymbol
 import org.jetbrains.kotlin.ir.symbols.IrSimpleFunctionSymbol
 import org.jetbrains.kotlin.ir.symbols.IrTypeParameterSymbol
 import org.jetbrains.kotlin.ir.types.IrType
 import org.jetbrains.kotlin.ir.types.classFqName
+import org.jetbrains.kotlin.ir.types.classOrNull
 import org.jetbrains.kotlin.ir.types.classifierOrNull
 import org.jetbrains.kotlin.ir.types.makeNullable
 import org.jetbrains.kotlin.ir.util.defaultType
+import org.jetbrains.kotlin.ir.util.hasAnnotation
+import org.jetbrains.kotlin.ir.util.isSubtypeOfClass
 import org.jetbrains.kotlin.name.CallableId
 import org.jetbrains.kotlin.name.ClassId
 import org.jetbrains.kotlin.name.FqName
@@ -24,6 +28,7 @@ private val REACT_RAW = FqName("react.raw")
 private val REACT_USE = FqName("react.use")
 private val JSX_RUNTIME = FqName("react.jsx.runtime")
 private val REACT_COMPILER = FqName("com.github.porotkin.reactcompiler")
+private val MUTABLE = FqName("com.github.porotkin.reactcompiler.Mutable")
 private val PROPS = classId(REACT, "Props")
 private val PROPS_WITH_CHILDREN = classId(REACT, "PropsWithChildren")
 private val FRAGMENT_PROPS = classId(REACT, "FragmentProps")
@@ -125,6 +130,25 @@ internal class ReactSymbols private constructor(
     /** `by useRefValue()`, and `by useLatest()` of kotlin-react-use: delegates that read and write a ref's `current`. */
     val refDelegates: List<IrClassSymbol> =
         listOfNotNull(finder.findClass(classId(REACT, "RefValueInstance")), finder.findClass(classId(REACT_USE, "LatestInstance")))
+
+    /** `mutableValue(value)` of the annotations artifact, typed by vite-plugin-react-kotlinjs as a value React does not own. */
+    val mutableValue = function(REACT_COMPILER, "mutableValue")
+
+    /** Classes whose instances React does not own without being marked [MUTABLE]: DOM event targets, refs, preact signals. */
+    private val mutableClasses: List<IrClassSymbol> = listOfNotNull(
+        finder.findClass(classId(FqName("web.events"), "EventTarget")),
+        refObjectClass,
+        finder.findClass(classId(FqName("preact.signals.core"), "Signal")),
+    )
+
+    /** Whether a value of [type] is one React does not own: a DOM event target, a ref, a preact signal or a `@Mutable` class. */
+    fun isMutable(type: IrType): Boolean {
+        val irClass = type.classOrNull?.owner ?: return false
+        return mutableClasses.any { type.isSubtypeOfClass(it) } || irClass.isMarkedMutable()
+    }
+
+    private fun IrClass.isMarkedMutable(): Boolean =
+        hasAnnotation(MUTABLE) || superTypes.any { it.classOrNull?.owner?.isMarkedMutable() == true }
 
     val stateInstanceClass: IrClassSymbol? = finder.findClass(classId(REACT, "StateInstance"))
     val stateSetterClass: IrClassSymbol? = finder.findClass(classId(REACT, "StateSetter"))

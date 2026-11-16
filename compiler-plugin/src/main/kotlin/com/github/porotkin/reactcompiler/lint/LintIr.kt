@@ -23,11 +23,14 @@ private val COLLECTION_MUTATORS = setOf(
 private val ARRAY_MUTATORS = setOf("fill", "reverse", "set", "shuffle", "sort", "sortBy", "sortByDescending", "sortDescending", "sortWith")
 
 /** The object a member or an extension is called on. */
-internal fun IrCall.receiver(): IrExpression? {
+internal fun IrCall.receiver(): IrExpression? =
+    arguments.getOrNull(receiverIndex())
+
+/** The index of [receiver] among the arguments, or -1 for a call with none. */
+internal fun IrCall.receiverIndex(): Int {
     val parameters = symbol.owner.parameters
-    val index = parameters.indexOfFirst { it.kind == IrParameterKind.DispatchReceiver }
+    return parameters.indexOfFirst { it.kind == IrParameterKind.DispatchReceiver }
         .takeIf { it >= 0 } ?: parameters.indexOfFirst { it.kind == IrParameterKind.ExtensionReceiver }
-    return arguments.getOrNull(index)
 }
 
 /** This expression without the casts and conversions around it. */
