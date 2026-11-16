@@ -1,6 +1,7 @@
 package com.github.porotkin.reactcompiler
 
 import com.github.porotkin.reactcompiler.component.ComponentLowering
+import com.github.porotkin.reactcompiler.hook.DelegateLowering
 import com.github.porotkin.reactcompiler.hook.HookCallLowering
 import com.github.porotkin.reactcompiler.hook.HookDirectiveLowering
 import com.github.porotkin.reactcompiler.lint.LintConfig
@@ -37,6 +38,7 @@ class ReactCompilerIrGenerationExtension internal constructor(
         val reporter = LintReporter(pluginContext, lint)
         ReactLint(symbols, LintSymbols(finder), reporter, pluginContext.irBuiltIns).check(moduleFragment)
         listOf(
+            DelegateLowering(pluginContext, symbols),
             HookCallLowering(pluginContext, symbols),
             HookDirectiveLowering(pluginContext, symbols),
             ComponentLowering(pluginContext, symbols, reporter),

@@ -105,6 +105,42 @@ class HookLoweringTest : PluginTest() {
     }
 
     @Test
+    fun `lowers ref and state local delegates without reflection metadata`() {
+        val mjs = compile(
+            """
+            import react.use.useLatest
+
+            value class Tag(val raw: String)
+
+            fun useTrackedState(initial: Int, latestLabel: String): () -> String {
+                val readOnly by useState(initial)
+                var count by useState(initial)
+                var dragging by useRefValue(false)
+                var tag by useRefValue(Tag("init"))
+                val latest by useLatest(latestLabel)
+                return useCallback(readOnly, count) {
+                    if (!dragging) {
+                        dragging = true
+                        tag = Tag(latest)
+                        count = count + 1
+                    }
+                    "${'$'}readOnly:${'$'}count:${'$'}{tag.raw}:${'$'}latest"
+                }
+            }
+            """,
+        )
+
+        assertFalse("getLocalDelegateReference" in mjs, "Expected no local delegate KProperty metadata in:\n$mjs")
+        assertFalse("KMutableProperty0" in mjs, "Expected no KMutableProperty0 import in:\n$mjs")
+        assertFalse("KProperty0" in mjs, "Expected no KProperty0 import in:\n$mjs")
+        assertTrue(".current" in mjs, "Expected direct .current access for ref delegates in:\n$mjs")
+        assertTrue(
+            "component1" in mjs && "component2" in mjs,
+            "Expected component1/component2 destructuring for state delegates in:\n$mjs"
+        )
+    }
+
+    @Test
     fun `eta-expands callable references passed to hooks while preserving KFunction metadata on custom hooks`() {
         val mjs = compile(
             """

@@ -381,13 +381,16 @@ private val REACT_HOOK_STUBS =
     fun <T : Any> useRef(initialValue: T? = null): RefObject<T> =
         js("({ current: initialValue })").unsafeCast<RefObject<T>>()
 
-    class RefValueInstance<T>(private var value: T) {
-        operator fun getValue(thisRef: Nothing?, property: KProperty<*>): T = value
+    class RefValueInstance<T>(@JsName("current") var current: T) {
+        inline operator fun getValue(thisRef: Nothing?, property: KProperty<*>): T = asDynamic().current
 
-        operator fun setValue(thisRef: Nothing?, property: KProperty<*>, value: T) {
-            this.value = value
+        inline operator fun setValue(thisRef: Nothing?, property: KProperty<*>, value: T) {
+            asDynamic().current = value
         }
     }
+
+    fun <T : Any> useRefValue(): RefValueInstance<T?> =
+        RefValueInstance(null)
 
     fun <T : Any> useRefValue(initialValue: T): RefValueInstance<T> =
         RefValueInstance(initialValue)
@@ -434,8 +437,8 @@ private val REACT_USE_STUBS =
 
     import kotlin.reflect.KProperty
 
-    class LatestInstance<T>(private val value: T) {
-        operator fun getValue(thisRef: Nothing?, property: KProperty<*>): T = value
+    class LatestInstance<T>(@JsName("current") val current: T) {
+        inline operator fun getValue(thisRef: Nothing?, property: KProperty<*>): T = asDynamic().current
     }
 
     fun <T> useLatest(value: T): LatestInstance<T> =

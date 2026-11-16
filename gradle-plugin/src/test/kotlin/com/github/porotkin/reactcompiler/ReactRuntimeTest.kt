@@ -109,6 +109,10 @@ class ReactRuntimeTest : PluginTest() {
         }.run(":app:compileDevelopmentExecutableKotlinJs")
 
         val mjsText = dir.walkTopDown().first { it.name.endsWith("-app.mjs") }.readText()
+        assertFalse(
+            "getLocalDelegateReference" in mjsText,
+            "Expected no getLocalDelegateReference in app.mjs:\n$mjsText"
+        )
         assertFalse("defaultSeparator\$ref" in mjsText, "Expected ::defaultSeparator eta-expanded in IR:\n$mjsText")
         assertFalse("format\$ref" in mjsText, "Expected formatter::format eta-expanded in IR:\n$mjsText")
 

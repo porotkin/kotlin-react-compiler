@@ -111,13 +111,17 @@ internal fun IrStatement.unwrapCoercion(): IrStatement =
     if (this is IrTypeOperatorCall && operator == IrTypeOperator.IMPLICIT_COERCION_TO_UNIT) argument else this
 
 /** Whether this element or any descendant matches [predicate]; stops descending at the first match. */
-internal fun IrElement.any(predicate: (IrElement) -> Boolean): Boolean {
-    var found = false
+internal fun IrElement.any(predicate: (IrElement) -> Boolean): Boolean =
+    find(predicate) != null
+
+/** The first of this element and its descendants, in pre-order, that matches [predicate]. */
+internal fun IrElement.find(predicate: (IrElement) -> Boolean): IrElement? {
+    var found: IrElement? = null
     acceptVoid(
         object : IrVisitorVoid() {
             override fun visitElement(element: IrElement) {
-                if (found) return
-                if (predicate(element)) found = true else element.acceptChildrenVoid(this)
+                if (found != null) return
+                if (predicate(element)) found = element else element.acceptChildrenVoid(this)
             }
         },
     )

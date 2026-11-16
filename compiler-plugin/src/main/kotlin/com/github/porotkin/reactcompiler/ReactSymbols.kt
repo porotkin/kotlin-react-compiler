@@ -5,8 +5,10 @@ import org.jetbrains.kotlin.backend.common.extensions.IrPluginContext
 import org.jetbrains.kotlin.ir.symbols.IrClassSymbol
 import org.jetbrains.kotlin.ir.symbols.IrConstructorSymbol
 import org.jetbrains.kotlin.ir.symbols.IrSimpleFunctionSymbol
+import org.jetbrains.kotlin.ir.symbols.IrTypeParameterSymbol
 import org.jetbrains.kotlin.ir.types.IrType
 import org.jetbrains.kotlin.ir.types.classFqName
+import org.jetbrains.kotlin.ir.types.classifierOrNull
 import org.jetbrains.kotlin.ir.types.makeNullable
 import org.jetbrains.kotlin.ir.util.defaultType
 import org.jetbrains.kotlin.name.CallableId
@@ -18,6 +20,7 @@ private val KOTLIN = FqName("kotlin")
 private val KOTLIN_JS = FqName("kotlin.js")
 private val REACT = FqName("react")
 private val REACT_RAW = FqName("react.raw")
+private val REACT_USE = FqName("react.use")
 private val JSX_RUNTIME = FqName("react.jsx.runtime")
 private val REACT_COMPILER = FqName("com.github.porotkin.reactcompiler")
 private val PROPS = classId(REACT, "Props")
@@ -25,6 +28,16 @@ private val PROPS_WITH_CHILDREN = classId(REACT, "PropsWithChildren")
 private val FRAGMENT_PROPS = classId(REACT, "FragmentProps")
 private val FC = classId(REACT, "FC")
 private val REACT_MARKERS = listOf(PROPS, FC, FRAGMENT_PROPS)
+
+/** `StateInstance` and what `val (value, setValue) = state` reads: `component1()`, `component2()` and `setValue(value)`. */
+internal class StateDelegate(
+    val instance: IrClassSymbol,
+    val component1: IrSimpleFunctionSymbol,
+    val component2: IrSimpleFunctionSymbol,
+    val setter: IrClassSymbol,
+    /** `StateSetter.invoke(value: T)`, as opposed to `invoke(transform: (T) -> T)`. */
+    val setValue: IrSimpleFunctionSymbol,
+)
 
 /** The kotlin-react, React runtime and Kotlin/JS declarations the lowerings reference. */
 internal class ReactSymbols private constructor(
@@ -76,6 +89,32 @@ internal class ReactSymbols private constructor(
             it.owner.typeParameters.singleOrNull()?.superTypes?.any { type -> type.classFqName == FqName("kotlin.Function") } == true
         },
     ).flatMap { (sources, target) -> sources.map { it to target } }.toMap()
+
+    /** `by useRefValue()`, and `by useLatest()` of kotlin-react-use: delegates that read and write a ref's `current`. */
+    val refDelegates: List<IrClassSymbol> =
+        listOfNotNull(finder.findClass(classId(REACT, "RefValueInstance")), finder.findClass(classId(REACT_USE, "LatestInstance")))
+
+    /** `by useState()`, or `null` when kotlin-react declares none of what [StateDelegate] needs. */
+    val stateDelegate: StateDelegate? = run {
+        val instance = classId(REACT, "StateInstance")
+        val setter = classId(REACT, "StateSetter")
+        StateDelegate(
+            instance = finder.findClass(instance) ?: return@run null,
+            component1 = member(instance, "component1") { it.owner.parameters.size == 1 } ?: return@run null,
+            component2 = member(instance, "component2") { it.owner.parameters.size == 1 } ?: return@run null,
+            setter = finder.findClass(setter) ?: return@run null,
+            setValue = member(setter, "invoke") {
+                it.owner.parameters.size == 2 && it.owner.parameters[1].type.classifierOrNull is IrTypeParameterSymbol
+            } ?: return@run null,
+        )
+    }
+
+    private fun member(
+        owner: ClassId,
+        name: String,
+        filter: (IrSimpleFunctionSymbol) -> Boolean,
+    ): IrSimpleFunctionSymbol? =
+        finder.findFunctions(CallableId(owner, Name.identifier(name))).singleOrNull(filter)
 
     private fun classSymbol(id: ClassId): IrClassSymbol =
         finder.findClass(id) ?: missing(id.asFqNameString())
