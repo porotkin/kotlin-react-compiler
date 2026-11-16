@@ -811,7 +811,7 @@ private fun impureMessage(call: String): String =
 /** The operators a destructuring declaration calls. */
 private val COMPONENT_N = Regex("component\\d+")
 private val COMPONENT_WRAPPER = FqName("com.github.porotkin.reactcompiler.ComponentWrapper")
-private val USE = FqName("react.use")
+private val USE_HOOK = FqName("react.use")
 private val RANDOM = FqName("kotlin.random.Random")
 private val DATE_CLASSES = setOf(FqName("kotlin.js.Date"), FqName("js.date.Date"))
 
@@ -866,7 +866,7 @@ private val IMPURE_MEMBERS = listOf(
 ).map { (type, member) -> FqName(type) to member }
 
 private fun IrSimpleFunction.isUse(): Boolean =
-    name.asString() == "use" && fqNameWhenAvailable == USE
+    name.asString() == "use" && fqNameWhenAvailable == USE_HOOK
 
 /**
  * Whether an inline function inlines the lambda passed for this parameter, and so runs it where it is written. It
