@@ -93,9 +93,13 @@ internal class ReactSymbols private constructor(
     val componentFactories: Set<IrSimpleFunctionSymbol> =
         functions(REACT, "FC") { it.owner.parameters.size == 1 }.toSet()
 
+    /** `react.useMemo` overloads. */
+    val useMemoHooks: Set<IrSimpleFunctionSymbol> =
+        functions(REACT, "useMemo").toSet()
+
     /** kotlin-react `(vararg dependencies, callback)` hooks mapped to their `(callback, dependencies)` raw form. */
     val rawHooks: Map<IrSimpleFunctionSymbol, IrSimpleFunctionSymbol> = listOf(
-        functions(REACT, "useMemo") to function(REACT_RAW, "useMemoRaw"),
+        useMemoHooks to function(REACT_RAW, "useMemoRaw"),
         functions(REACT, "useCallback") to function(REACT_RAW, "useCallbackRaw") {
             it.owner.typeParameters.singleOrNull()?.superTypes?.any { type -> type.classFqName == FqName("kotlin.Function") } == true
         },

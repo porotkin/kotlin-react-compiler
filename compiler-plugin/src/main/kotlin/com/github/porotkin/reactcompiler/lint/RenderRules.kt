@@ -122,7 +122,7 @@ internal class RenderRules(
     private val initializationChecks = mutableSetOf<IrCall>()
 
     private val reportedNames = mutableSetOf<IrValueSymbol>()
-    private val dependencies = ExhaustiveDeps(file, lint, reporter, delegated, stable)
+    private val dependencies = ExhaustiveDeps(file, symbols, lint, reporter, delegated, stable)
 
     fun check() {
         file.acceptChildrenVoid(this)
@@ -389,13 +389,13 @@ internal class RenderRules(
             callee.fqNameWhenAvailable in RUN_ONCE_FUNCTIONS -> Scope.BLOCK
             callee.isInline && parameter.isInlined() -> Scope.IN_PLACE
             call.isUseMemo() -> Scope.MEMO
-            callee.fqNameWhenAvailable in EFFECT_HOOKS -> Scope.EFFECT
+            call.symbol in symbols.effectHooks -> Scope.EFFECT
             else -> Scope.CALLBACK
         }
     }
 
     private fun IrCall.isUseMemo(): Boolean =
-        symbol in symbols.rawHooks && symbol.owner.name.asString() == "useMemo"
+        symbol in symbols.useMemoHooks
 
     /** Whether [this] call is made on a `ChildrenBuilder`: as its member, its extension, or in its context. */
     private fun IrCall.isOnBuilder(callee: IrSimpleFunction): Boolean =
@@ -825,9 +825,6 @@ private val RUN_ONCE_FUNCTIONS = SCOPE_FUNCTIONS + setOf(
     "js.objects.jso",
     "js.objects.unsafeJso",
 ).map(::FqName)
-
-private val EFFECT_HOOKS = setOf("useEffect", "useLayoutEffect", "useInsertionEffect")
-    .flatMapTo(mutableSetOf()) { listOf(FqName("react.$it"), FqName("react.${it}Once")) }
 
 private val COMPONENT_FACTORIES = setOf("react.memo", "react.forwardRef", "react.lazy").mapTo(mutableSetOf(), ::FqName)
 

@@ -1,5 +1,6 @@
 package com.github.porotkin.reactcompiler.lint
 
+import com.github.porotkin.reactcompiler.ReactSymbols
 import org.jetbrains.kotlin.descriptors.InlineClassRepresentation
 import org.jetbrains.kotlin.ir.IrElement
 import org.jetbrains.kotlin.ir.declarations.IrDeclarationParent
@@ -19,12 +20,10 @@ import org.jetbrains.kotlin.ir.symbols.IrSimpleFunctionSymbol
 import org.jetbrains.kotlin.ir.symbols.IrSymbol
 import org.jetbrains.kotlin.ir.types.IrType
 import org.jetbrains.kotlin.ir.types.classOrNull
-import org.jetbrains.kotlin.ir.util.fqNameWhenAvailable
 import org.jetbrains.kotlin.ir.util.isGetter
 import org.jetbrains.kotlin.ir.visitors.IrVisitorVoid
 import org.jetbrains.kotlin.ir.visitors.acceptChildrenVoid
 import org.jetbrains.kotlin.ir.visitors.acceptVoid
-import org.jetbrains.kotlin.name.FqName
 import org.jetbrains.kotlin.name.Name
 
 /**
@@ -41,6 +40,7 @@ import org.jetbrains.kotlin.name.Name
  */
 internal class ExhaustiveDeps(
     private val file: IrFile,
+    private val symbols: ReactSymbols,
     private val lint: LintSymbols,
     private val reporter: LintReporter,
     /** The accessors of `by` locals, which a read or an assignment of the local calls. */
@@ -60,7 +60,7 @@ internal class ExhaustiveDeps(
         val elements = when {
             parameter >= 0 -> (call.arguments[parameter] as? IrVararg)?.elements.orEmpty()
             // A hook that runs once takes no dependencies because it has none.
-            callee.fqNameWhenAvailable in RUN_ONCE_HOOKS -> emptyList()
+            symbols.effectHooks[call.symbol]?.runOnce == true -> emptyList()
             else -> return
         }
         if (elements.any { it is IrSpreadElement }) {
@@ -84,7 +84,7 @@ internal class ExhaustiveDeps(
             .mapTo(linkedSetOf()) { it.toString() }
         // An effect may depend on more than it reads, to run again; a memoized value may not, React's linter says.
         val unnecessary = declared
-            .filter { callee.fqNameWhenAvailable in MEMO_HOOKS && !it.isStable }
+            .filter { call.symbol in symbols.rawHooks && !it.isStable }
             .filter { dependency -> read.none { it.root == dependency.root && (it.startsWith(dependency) || dependency.startsWith(it)) } }
             .mapTo(linkedSetOf()) { it.toString() }
 
@@ -209,7 +209,3 @@ private fun IrValueParameter.isDependencies(): Boolean =
     varargElementType != null && name.asString() in DEPENDENCY_PARAMETERS
 
 private val DEPENDENCY_PARAMETERS = setOf("dependencies", "deps")
-
-private val RUN_ONCE_HOOKS = setOf("useEffectOnce", "useLayoutEffectOnce", "useInsertionEffectOnce").mapTo(mutableSetOf()) { FqName("react.$it") }
-
-private val MEMO_HOOKS = setOf(FqName("react.useMemo"), FqName("react.useCallback"))
