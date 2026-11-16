@@ -69,6 +69,10 @@ internal fun IrSimpleFunction.componentWrapperRenderParameter(symbols: ReactSymb
     return parameters.singleOrNull { it.type.isRenderLambdaType(symbols) }
 }
 
+/** Whether [this] constructs and returns a component (`@ComponentWrapper`, or `: FC<...>`) rather than rendering. */
+internal fun IrSimpleFunction.returnsComponent(symbols: ReactSymbols): Boolean =
+    isComponentWrapper() || returnType.isSubtypeOfClass(symbols.fcClass)
+
 /**
  * Whether [this] takes a `ChildrenBuilder` to add elements to: as a receiver or context parameter (including
  * `PropsWithChildren` subtypes), or as an explicit `ChildrenBuilder` parameter. Plain `PropsWithChildren` regular
@@ -79,6 +83,10 @@ internal fun IrFunction.buildsChildren(symbols: ReactSymbols): Boolean =
         it.type.classOrNull == symbols.childrenBuilderClass ||
             it.kind != IrParameterKind.Regular && it.type.isSubtypeOfClass(symbols.childrenBuilderClass)
     }
+
+/** Whether [this] named function is a component or `ChildrenBuilder` helper, as opposed to a hook or factory. */
+internal fun IrSimpleFunction.isComponentFunction(symbols: ReactSymbols): Boolean =
+    !name.isHookName() && !returnsComponent(symbols) && (buildsChildren(symbols) || name.isComponentName())
 
 /** Whether [this] call is made on a `ChildrenBuilder`: as its member, its extension, or in its context. */
 internal fun IrCall.isOnBuilder(symbols: ReactSymbols): Boolean =

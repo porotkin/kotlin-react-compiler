@@ -2,7 +2,7 @@ package com.github.porotkin.reactcompiler.lint
 
 import com.github.porotkin.reactcompiler.ReactSymbols
 import com.github.porotkin.reactcompiler.buildsChildren
-import com.github.porotkin.reactcompiler.isComponentName
+import com.github.porotkin.reactcompiler.isComponentFunction
 import com.github.porotkin.reactcompiler.isHookName
 import com.github.porotkin.reactcompiler.isOnBuilder
 import com.github.porotkin.reactcompiler.optsOutOfMemo
@@ -46,7 +46,7 @@ internal class RenderScope(
     fun frameFor(declaration: IrSimpleFunction): Frame {
         val scope = when {
             declaration.name.isHookName() -> Scope.HOOK
-            declaration.buildsChildren(symbols) || declaration.name.isComponentName() -> Scope.COMPONENT
+            declaration.isComponentFunction(symbols) -> Scope.COMPONENT
             else -> Scope.OTHER
         }
         // A capitalized function is a component by its name only, so it is held to the rules of render only if it takes props.
@@ -212,7 +212,7 @@ internal enum class Scope {
     /** The body of a function named `use…`. */
     HOOK,
 
-    /** Any other named function, a constructor, a class body, or the top level of the file. */
+    /** Any other named function (including component factories), a constructor, a class body, or the top level of the file. */
     OTHER,
 
     /** A lambda that runs once where it is written, as part of the code around it: `run { }`, `div { }`. */

@@ -255,6 +255,13 @@ class RenderLintTest : LintTest() {
                 return renderCount
             }
 
+            @com.github.porotkin.reactcompiler.ComponentWrapper
+            fun <P : Props> WrapWithFallback(
+                fallback: P,
+                render: ChildrenBuilder.(props: P) -> Unit,
+            ): FC<P> =
+                memo(FC(render))
+
             val Title: FC<TitleProps> = FC { props ->
                 div { +props.title }
             }
@@ -262,12 +269,17 @@ class RenderLintTest : LintTest() {
             val CreatesComponents: FC<TitleProps> = FC { props ->
                 val Inner = FC<TitleProps> { div { +"inner" } } // ! REACT_STATIC_COMPONENTS
                 val Memoized = memo(Title) // ! REACT_STATIC_COMPONENTS
+                val Wrapped = WrapWithFallback(props) { div { +"wrapped" } } // ! REACT_STATIC_COMPONENTS
                 Inner { title = props.title }
                 Memoized { title = props.title }
+                Wrapped { title = props.title }
             }
 
             fun createTitle(prefix: String): FC<TitleProps> =
                 FC { props -> div { +"${'$'}prefix ${'$'}{props.title}" } }
+
+            fun DefaultTitle(fallback: TitleProps): FC<TitleProps> =
+                FC { props -> div { +"${'$'}{fallback.title} ${'$'}{props.title}" } }
             """,
         )
     }

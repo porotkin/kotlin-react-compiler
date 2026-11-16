@@ -184,6 +184,11 @@ class RulesOfHooksLintTest : LintTest() {
             fun getLabel(props: FragmentProps): Int =
                 useValue() + props.hashCode() // ! REACT_RULES_OF_HOOKS
 
+            fun TitleFactory(props: Props): FC<Props> {
+                val initial = useValue() // ! REACT_RULES_OF_HOOKS
+                return FC { div { +"${'$'}initial ${'$'}props" } }
+            }
+
             suspend fun useSuspended(): Int =
                 useValue() // ! REACT_RULES_OF_HOOKS
 
@@ -204,6 +209,7 @@ class RulesOfHooksLintTest : LintTest() {
         assertTrue("Hook `useValue` is called in a nested function." in result.output, result.output)
         assertTrue("Hook `useValue` is called in `getValue`, which is neither a component nor a hook." in result.output, result.output)
         assertTrue("Hook `useValue` is called in `getLabel`, which is neither a component nor a hook." in result.output, result.output)
+        assertTrue("Hook `useValue` is called in `TitleFactory`, which is neither a component nor a hook." in result.output, result.output)
         assertTrue("Hook `useValue` is called outside a component or hook." in result.output, result.output)
         assertTrue("Hook `useValue` is called in a suspend function." in result.output, result.output)
     }
