@@ -103,4 +103,54 @@ class HookLoweringTest : PluginTest() {
         assertTrue(Regex("""var (dep\w*) = toString\(trim\([^\n]+\)\);\s+var len = useMemoRaw\(function \(\) \{[^}]+\}, \[\1\]\);""") in mjs, "Expected hoisted useMemo dependency in:\n$mjs")
         assertTrue(Regex("""var (dep\w*) = props\.get_step_[\w$]+\(\) \+ 1 \| 0;\s+return useCallbackRaw\(function \(\) \{[^}]+\}, \[len, \1\]\);""") in mjs, "Expected hoisted useCallback dependency in:\n$mjs")
     }
+
+    @Test
+    fun `eta-expands callable references passed to hooks while preserving KFunction metadata on custom hooks`() {
+        val mjs = compile(
+            """
+            import kotlin.reflect.KFunction1
+
+            class Formatter(val prefix: String) {
+                fun format(value: Int): String = "${'$'}prefix:${'$'}value"
+            }
+
+            fun defaultHeader(): String = "Header"
+
+            fun resetCounter(step: Int = 1): Int = step
+
+            fun <T> useNamedFactory(factory: KFunction1<String, T>): String = factory.name
+
+            fun usePlainMapper(mapper: (Int) -> String): String = mapper(1)
+
+            fun usePlainAction(action: () -> Unit) {
+                action()
+            }
+
+            fun useFormatted(formatter: Formatter): Pair<String, (Int) -> String> {
+                val header = useMemo(callback = ::defaultHeader)
+                val format = useCallback(formatter, callback = formatter::format)
+                usePlainAction(::resetCounter)
+                val mapped = usePlainMapper(formatter::format)
+                val factoryName = useNamedFactory(::Formatter)
+                return "${'$'}header:${'$'}mapped:${'$'}factoryName" to format
+            }
+            """,
+        )
+
+        assertFalse("defaultHeader\$ref" in mjs, "Expected ::defaultHeader eta-expanded inline in:\n$mjs")
+        assertFalse("format\$ref" in mjs, "Expected bound formatter::format eta-expanded inline in:\n$mjs")
+        assertFalse("resetCounter\$ref" in mjs, "Expected adapted ::resetCounter eta-expanded inline in:\n$mjs")
+        assertTrue(
+            "Formatter\$_init_\$ref" in mjs,
+            "Expected KFunction1 custom hook argument to keep \$ref metadata in:\n$mjs"
+        )
+        assertTrue(
+            Regex("""useMemoRaw\(function \(\) \{\s+return defaultHeader\(\);\s+\}, \[\]\)""") in mjs,
+            "Expected inline defaultHeader call in:\n$mjs"
+        )
+        assertTrue(
+            Regex("""useCallbackRaw\(function \([\w$]+\) \{\s+return formatter\.format_[\w$]+\([\w$]+\);\s+\}, \[formatter\]\)""") in mjs,
+            "Expected inline bound formatter.format call in:\n$mjs"
+        )
+    }
 }

@@ -53,6 +53,12 @@ class ReactRuntimeTest : PluginTest() {
 
                 var footerRenders = 0
 
+                class Formatter(val sep: String) {
+                    fun format(label: String, count: Int): String = "${'$'}label${'$'}sep${'$'}count"
+                }
+
+                fun defaultSeparator(): String = ":"
+
                 private fun ChildrenBuilder.Heading(title: String) {
                     span { +title }
                 }
@@ -65,7 +71,11 @@ class ReactRuntimeTest : PluginTest() {
 
                 private fun ChildrenBuilder.InnerCounter(label: String) {
                     var count by useState(0)
-                    val text = useMemo(label, count) { "${'$'}label:${'$'}count" }
+                    val sep = useMemo(callback = ::defaultSeparator)
+                    val suffix = useMemo { "" }
+                    val formatter = useMemo(sep) { Formatter(sep) }
+                    val formatCount = useCallback(formatter, callback = formatter::format)
+                    val text = useMemo(label, count, formatCount, suffix) { formatCount(label, count) + suffix }
                     button {
                         onClick = { count += 1 }
                         +text
@@ -97,6 +107,10 @@ class ReactRuntimeTest : PluginTest() {
                 "lib",
             )
         }.run(":app:compileDevelopmentExecutableKotlinJs")
+
+        val mjsText = dir.walkTopDown().first { it.name.endsWith("-app.mjs") }.readText()
+        assertFalse("defaultSeparator\$ref" in mjsText, "Expected ::defaultSeparator eta-expanded in IR:\n$mjsText")
+        assertFalse("format\$ref" in mjsText, "Expected formatter::format eta-expanded in IR:\n$mjsText")
 
         val output = runWithReactCompiler(
             "app",
