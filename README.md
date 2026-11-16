@@ -34,7 +34,7 @@ executable too.
 
 ## What It Lowers
 
-- **Component lowering (`FC`):** Rewrites `FC { ... }` component lambdas from `($this$FC, props) -> Unit` into `(props) -> ReactNode?` functions that emit `"use memo"` at the start of the body, keep hook calls at the top level, and lower `ChildrenBuilder` element DSL calls into direct `jsx(type, attrs, key)` calls. The key is the element's explicit `key` when one is set, otherwise `"@rdk/<line>_<col>"` of the call site; an element a loop adds gets no source key, which would be the same for every item, and neither does the node a component helper returns, which its caller may call more than once under one parent. The children of an element with a loop among them, including one in an `if`, `when` or `let`, are pushed onto one array React gets as static children (`jsxs`), as kotlin-react's builder collects them.
+- **Component lowering (`FC`):** Rewrites `FC { ... }` component lambdas from `($this$FC, props) -> Unit` into `(props) -> ReactNode?` functions that emit `"use memo"` at the start of the body, keep hook calls at the top level, and lower `ChildrenBuilder` element DSL calls into direct `jsx(type, attrs, key)` calls. The key is the element's explicit `key` when one is set, otherwise `"@rdk/<file>/<line>_<col>"` of the call site, where `<file>` is a hash of the package and file name, so children another file built never share a key with a component's own; an element a loop adds gets no source key, which would be the same for every item, and neither does the node a component helper returns, which its caller may call more than once under one parent. The children of an element with a loop among them, including one in an `if`, `when` or `let`, are pushed onto one array React gets as static children (`jsxs`), as kotlin-react's builder collects them.
 
   ```kotlin
   val Title = FC<TitleProps> { props ->
@@ -46,7 +46,7 @@ executable too.
     'use memo';
     var attrs = {};
     attrs.children = props.title;
-    return jsx(h1, attrs, '@rdk/1_4');
+    return jsx(h1, attrs, '@rdk/1ox2ifs/1_4');
   }
   ```
 - **Component helpers:** `private fun ChildrenBuilder.Foo(...)` functions returning `Unit` that a lowered component calls are lowered the same way when their bodies can be. The lowered copy drops the `ChildrenBuilder` receiver and replaces the original, or is added next to it as `Foo$lowered` while other code still calls the original. A lowered helper that calls hooks is renamed `useFoo` and gets `"use memo"`: React Compiler recognizes hooks only by name and would otherwise memoize the call and drop its hooks' state. Helpers without hooks keep their name and get no directive, so their caller memoizes the call on its arguments and may call them conditionally. Recursive helpers are not lowered.

@@ -340,6 +340,74 @@ class ReactRuntimeTest : PluginTest() {
         )
     }
 
+    @Test
+    fun `keys children from different files apart when they share a line and column in React 19`() {
+        TestProject(dir, realReact = true).apply {
+            // `b` in Panel and `i` in Page both start at line 14, column 8 of their files.
+            module(
+                "lib",
+                """
+                package lib
+
+                import react.*
+
+                private val div: ElementType<FragmentProps> = "div".unsafeCast<ElementType<FragmentProps>>()
+                private val b: ElementType<FragmentProps> = "b".unsafeCast<ElementType<FragmentProps>>()
+
+                external interface PanelProps : PropsWithChildren {
+                    var unused: Int
+                }
+
+                val Panel: FC<PanelProps> = FC { props ->
+                    div {
+                        +props.children
+                        b { +"own" }
+                    }
+                }
+                """,
+            )
+            module(
+                "app",
+                """
+                @file:OptIn(kotlin.js.ExperimentalJsExport::class)
+                @file:Suppress("REACT_ONLY_EXPORT_COMPONENTS")
+
+                package app
+
+                import lib.Panel
+                import react.*
+
+                private val i: ElementType<FragmentProps> = "i".unsafeCast<ElementType<FragmentProps>>()
+
+                @JsExport
+                fun page(): Any = Page
+                val Page: FC<Props> = FC {
+                    Panel {
+                        i { +"forwarded" }
+                    }
+                }
+                """,
+                "lib",
+            )
+        }.run(":app:compileDevelopmentExecutableKotlinJs")
+
+        val output = runWithReactCompiler(
+            "app",
+            """
+            const container = document.createElement('div');
+            document.body.appendChild(container);
+            const root = createRoot(container);
+            await act(async () => {
+              root.render(React.createElement(m.page(), {}));
+            });
+            console.log(JSON.stringify({ compiled, consoleErrors, html: container.innerHTML }));
+            """.trimIndent(),
+        )
+
+        assertTrue(""""consoleErrors":[]""" in output, "Expected no duplicate key warning in:\n$output")
+        assertTrue(""""html":"<div><i>forwarded</i><b>own</b></div>"""" in output, "Expected both children rendered in:\n$output")
+    }
+
     /**
      * Copies the compiled `.mjs` bundle for [module] into a working directory under `testNodeDir`, compiles the
      * module with `babel-plugin-react-compiler` (`annotation` mode, React 19 target), and runs [script] in Node with

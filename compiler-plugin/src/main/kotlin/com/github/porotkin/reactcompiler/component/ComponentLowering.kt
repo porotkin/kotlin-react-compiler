@@ -7,7 +7,6 @@ import com.github.porotkin.reactcompiler.lint.LintRule
 import com.github.porotkin.reactcompiler.optsOutOfMemo
 import com.github.porotkin.reactcompiler.reportInfo
 import org.jetbrains.kotlin.backend.common.extensions.IrPluginContext
-import org.jetbrains.kotlin.ir.IrFileEntry
 import org.jetbrains.kotlin.ir.IrStatement
 import org.jetbrains.kotlin.ir.builders.irImplicitCast
 import org.jetbrains.kotlin.ir.declarations.IrFile
@@ -33,11 +32,11 @@ internal class ComponentLowering(
     private val lint: LintReporter,
 ) : ReactLowering(context, symbols) {
     private val wrappers = ComponentWrappers(context, symbols)
-    private lateinit var fileEntry: IrFileEntry
+    private lateinit var file: IrFile
     private lateinit var helpers: ComponentHelpers
 
     override fun lower(irFile: IrFile) {
-        fileEntry = irFile.fileEntry
+        file = irFile
         helpers = ComponentHelpers(irFile, symbols) { fn, builder, items, memoize -> rewrite(fn, builder, items, memoize, helper = true) }
         super.lower(irFile)
         helpers.install()
@@ -96,6 +95,6 @@ internal class ComponentLowering(
         memoize: Boolean = true,
         helper: Boolean = false,
     ) {
-        ComponentEmitter(fn, symbols, builder(fn.symbol, fn), fileEntry, helpers::resolve, helper).rewrite(builderParameter, items, memoize)
+        ComponentEmitter(fn, symbols, builder(fn.symbol, fn), file, helpers::resolve, helper).rewrite(builderParameter, items, memoize)
     }
 }

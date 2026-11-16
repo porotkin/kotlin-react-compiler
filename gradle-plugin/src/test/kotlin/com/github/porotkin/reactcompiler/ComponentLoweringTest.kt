@@ -51,9 +51,9 @@ class ComponentLoweringTest : PluginTest() {
         )
 
         assertTrue(Regex("""import \{ jsxs as jsxs \} from 'react/jsx-runtime'""") in mjs, "Expected React's jsxs imported in:\n$mjs")
-        assertTrue(Regex("""jsxs\(type, attrs, '@rdk/\d+_\d+'\)""") in mjs, "Expected source-keyed jsxs call in:\n$mjs")
+        assertTrue(Regex("""jsxs\(type, attrs, '@rdk/\w+/\d+_\d+'\)""") in mjs, "Expected source-keyed jsxs call in:\n$mjs")
         assertTrue(Regex("""jsxs\(type\w*, attrs\w*, (key\w*) == null \? undefined : \1\)""") in mjs, "Expected nullable key passed as undefined in:\n$mjs")
-        assertTrue(Regex("""[^s]jsx\(type\w*, attrs\w*, '@rdk/\d+_\d+'\)""") in mjs, "Expected single child kept on jsx in:\n$mjs")
+        assertTrue(Regex("""[^s]jsx\(type\w*, attrs\w*, '@rdk/\w+/\d+_\d+'\)""") in mjs, "Expected single child kept on jsx in:\n$mjs")
     }
 
     @Test
@@ -93,7 +93,7 @@ class ComponentLoweringTest : PluginTest() {
                 const entry = map.findEntry(line, column);
                 if (entry.generatedLine === line && entry.generatedColumn === column && entry.originalSource) sources.add(kotlin[entry.originalLine].trim());
               }
-              console.log(js[line].trim().replace(/_[a-z0-9]+_k\${'$'}|@rdk\/\w+/g, '') + ' <- ' + [...sources].join(' | '));
+              console.log(js[line].trim().replace(/_[a-z0-9]+_k\${'$'}|@rdk\/\w+\/\w+/g, '') + ' <- ' + [...sources].join(' | '));
             }
             """,
         )
@@ -353,7 +353,7 @@ class ComponentLoweringTest : PluginTest() {
         val lists = Regex("""(children\w*)\.push\(""").findAll(mjs).map { it.groupValues[1] }.toSet()
         assertTrue(lists.size == 1, "Expected for and repeat loop children pushed onto one array in:\n$mjs")
         // `jsx` would make React read the array as a list and ask its items for keys.
-        assertTrue(Regex("""jsxs\(type\w*, attrs\w*, '@rdk/\d+_\d+'\)""") in mjs, "Expected the array passed as static children to jsxs in:\n$mjs")
+        assertTrue(Regex("""jsxs\(type\w*, attrs\w*, '@rdk/\w+/\d+_\d+'\)""") in mjs, "Expected the array passed as static children to jsxs in:\n$mjs")
         assertTrue(Regex("""jsx\(type\w*, attrs\w*, entry\)""") in mjs, "Expected explicit key passed as 3rd argument to jsx in:\n$mjs")
         // A source key would be the same for every item a loop adds.
         assertTrue(Regex("""jsx\(type\w*, attrs\w*, null\)""") in mjs, "Expected no source key on an item a loop repeats in:\n$mjs")
@@ -528,7 +528,7 @@ class ComponentLoweringTest : PluginTest() {
         assertTrue(isLowered(mjs, "ConditionalKeyView\$lambda"), "Expected ConditionalKeyView lowered in:\n$mjs")
         assertTrue(Regex("""attrs\.set_key_[\w$]+\('active-key'\);""") in mjs, "Expected conditional key set on attrs inside branch in:\n$mjs")
         assertFalse("var key = 'active-key';" in mjs, "Expected conditional key not hoisted to a var key local in:\n$mjs")
-        assertTrue(Regex("""jsx\(type, attrs, '@rdk/\d+_\d+'\)""") in mjs, "Expected source key passed as 3rd argument to jsx in:\n$mjs")
+        assertTrue(Regex("""jsx\(type, attrs, '@rdk/\w+/\d+_\d+'\)""") in mjs, "Expected source key passed as 3rd argument to jsx in:\n$mjs")
     }
 
     @Test
@@ -895,7 +895,8 @@ class ComponentLoweringTest : PluginTest() {
         assertTrue(""""fallbackValue":42""" in output, "Expected unlowered fallback to populate value prop in:\n$output")
         assertTrue(""""fallbackRendered":{"type":"Count:setter","props":{"children":{"type":"Count:value","props":{"value":42,"children":"fallback-42"}""" in output, "Expected unlowered fallback component to render in:\n$output")
         assertTrue(""""loweredRendered":{"type":"Count:setter","props":{"children":{"type":"Count:value","props":{"value":7""" in output, "Expected lowered tree component to execute and render count=7 in:\n$output")
-        assertTrue(""""loweredTree":{"props":{"value":7,"children":{"props":{"value":"ok","children":{"type":"span","props":{"children":"ok"},"key":"@rdk/20_12"}},"key":"@rdk/19_8"}},"key":"@rdk/18_4"}""" in output, "Expected lowered tree to pass count=7 and label='ok' with keys in:\n$output")
+        val file = "app/App.kt".hashCode().toUInt().toString(36)
+        assertTrue(""""loweredTree":{"props":{"value":7,"children":{"props":{"value":"ok","children":{"type":"span","props":{"children":"ok"},"key":"@rdk/$file/20_12"}},"key":"@rdk/$file/19_8"}},"key":"@rdk/$file/18_4"}""" in output, "Expected lowered tree to pass count=7 and label='ok' with keys in:\n$output")
 
         val externalDir = dir.resolve("external-jsname")
         TestProject(externalDir, externalProps = true).apply {

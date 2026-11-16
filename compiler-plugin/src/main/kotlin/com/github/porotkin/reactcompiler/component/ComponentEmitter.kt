@@ -6,7 +6,6 @@ import com.github.porotkin.reactcompiler.irUseMemo
 import com.github.porotkin.reactcompiler.irVal
 import com.github.porotkin.reactcompiler.isUseMemo
 import org.jetbrains.kotlin.ir.IrElement
-import org.jetbrains.kotlin.ir.IrFileEntry
 import org.jetbrains.kotlin.ir.IrStatement
 import org.jetbrains.kotlin.ir.builders.IrBuilderWithScope
 import org.jetbrains.kotlin.ir.builders.at
@@ -22,6 +21,7 @@ import org.jetbrains.kotlin.ir.builders.irReturn
 import org.jetbrains.kotlin.ir.builders.irString
 import org.jetbrains.kotlin.ir.builders.irVararg
 import org.jetbrains.kotlin.ir.builders.irWhen
+import org.jetbrains.kotlin.ir.declarations.IrFile
 import org.jetbrains.kotlin.ir.declarations.IrSimpleFunction
 import org.jetbrains.kotlin.ir.declarations.IrValueParameter
 import org.jetbrains.kotlin.ir.declarations.IrVariable
@@ -66,7 +66,7 @@ internal class ComponentEmitter(
     private val fn: IrSimpleFunction,
     private val symbols: ReactSymbols,
     private val b: IrBuilderWithScope,
-    private val fileEntry: IrFileEntry,
+    private val file: IrFile,
     private val resolveHelper: (IrSimpleFunctionSymbol) -> IrSimpleFunctionSymbol,
     private val helper: Boolean,
 ) {
@@ -454,10 +454,18 @@ internal class ComponentEmitter(
     ): IrExpression =
         b.irBlock(resultType = type) { statements.forEach { +it } }
 
+    /**
+     * `"@rdk/<file>/<line>_<col>"` of [call]. A component renders children other files built beside its own, so the
+     * line and column alone can repeat among siblings; the file part, a hash of the package and file name, keeps them
+     * apart and stays the same on every machine.
+     */
     private fun sourceKey(call: IrCall): IrExpression? {
         if (call.startOffset < 0) return null
-        return b.irString("@rdk/${fileEntry.getLineNumber(call.startOffset)}_${fileEntry.getColumnNumber(call.startOffset)}")
+        val entry = file.fileEntry
+        return b.irString("@rdk/$fileId/${entry.getLineNumber(call.startOffset)}_${entry.getColumnNumber(call.startOffset)}")
     }
+
+    private val fileId by lazy { "${file.packageFqName}/${file.fileEntry.name.substringAfterLast('/')}".hashCode().toUInt().toString(36) }
 }
 
 /**
