@@ -135,10 +135,20 @@ internal class ComponentEmitter(
         items: List<Item>,
         out: MutableList<IrStatement>,
     ): IrExpression {
-        val children = Children()
+        val children = Children(listFor(items, out))
         items.forEach { emit(it, out, children) }
-        return nodeOf(children.nodes, out)
+        return nodeOf(children, out)
     }
+
+    /**
+     * The array every child of [items] is pushed onto when a loop among them adds a number of children known only at
+     * run time, as kotlin-react's builder collects them, or `null` without a loop.
+     */
+    private fun listFor(
+        items: List<Item>,
+        out: MutableList<IrStatement>,
+    ): IrVariable? =
+        if (items.any { it.addsLoop() }) local("children", b.irJs(symbols, "([])"), out) else null
 
     private fun emit(
         item: Item,
@@ -150,7 +160,16 @@ internal class ComponentEmitter(
             is Rebind -> out += item.variable.apply { initializer = item.initializer }
             is KeyProp -> children.key = stable(item.value, "key", out)
             is Guard -> out += at(item.condition) { guard(item) }
-            is Child -> children.add(at(item.source) { child(item, out) })
+            is Child -> {
+                val list = children.list
+                when {
+                    list == null -> children.nodes += at(item.source) { child(item, out, repeated = false) }
+                    item is Nested -> at(item.source) { pushNested(item, list, out, children.repeated) }
+                    else -> out += at(item.source) {
+                        dynamic(IrDynamicOperator.INVOKE, b.irGet(list), "push", child(item, out, children.repeated))
+                    }
+                }
+            }
         }
     }
 
@@ -169,9 +188,11 @@ internal class ComponentEmitter(
         return b.irWhen(unitType, listOf(b.irBranch(guard.condition, b.irBlock(resultType = unitType) { then.forEach { +it } })))
     }
 
+    /** The node of [child]; one [repeated] by a loop among its siblings gets no source key, which would repeat too. */
     private fun child(
         child: Child,
         out: MutableList<IrStatement>,
+        repeated: Boolean,
     ): IrExpression =
         when (child) {
             is Text -> {
@@ -180,25 +201,14 @@ internal class ComponentEmitter(
             }
             is HelperCall -> b.irGet(local("el", helperCall(child.call), out))
             is ChildWithProps -> b.irGet(local("el", childWithProps(child), out))
-            is Element -> b.irGet(local("el", element(child), out))
+            is Element -> b.irGet(local("el", element(child, repeated), out))
             is Choice -> b.irGet(local("el", choice(child), out))
             is LetBlock -> {
                 substitutions[child.parameter.symbol] = local(child.parameter.name.asString(), child.value, out)
                 node(child.items, out)
             }
-            is WhileLoop -> list(child, out)
-            is RepeatLoop -> list(child, out)
+            is WhileLoop, is RepeatLoop -> error("A loop is pushed onto the children array of its parent")
         }
-
-    /** The array [loop] fills with its children. */
-    private fun list(
-        loop: Nested,
-        out: MutableList<IrStatement>,
-    ): IrExpression {
-        val list = local("list", b.irJs(symbols, "([])"), out)
-        pushNested(loop, list, out)
-        return b.irGet(list)
-    }
 
     /**
      * Emits [items] as statements that push each child onto [list]. So do the children of the branches, blocks and
@@ -208,16 +218,11 @@ internal class ComponentEmitter(
     private fun pushAll(
         items: List<Item>,
         list: IrVariable,
+        repeated: Boolean,
     ): List<IrStatement> {
         val out = mutableListOf<IrStatement>()
-        val pushed = object : Children() {
-            override fun add(node: IrExpression) {
-                out += at(node) { dynamic(IrDynamicOperator.INVOKE, b.irGet(list), "push", node) }
-            }
-        }
-        for (item in items) {
-            if (item is Nested) at(item.source) { pushNested(item, list, out) } else emit(item, out, pushed)
-        }
+        val pushed = Children(list, repeated)
+        items.forEach { emit(it, out, pushed) }
         return out
     }
 
@@ -226,27 +231,28 @@ internal class ComponentEmitter(
         nested: Nested,
         list: IrVariable,
         out: MutableList<IrStatement>,
+        repeated: Boolean,
     ) {
         when (nested) {
             is Choice -> out += b.irWhen(
                 unitType,
                 nested.branches.map { branch ->
-                    val body = block(pushAll(branch.items, list), unitType)
+                    val body = block(pushAll(branch.items, list, repeated), unitType)
                     branch.condition?.let { b.irBranch(it, body) } ?: b.irElseBranch(body)
                 },
             )
             is LetBlock -> {
                 substitutions[nested.parameter.symbol] = local(nested.parameter.name.asString(), nested.value, out)
-                out += pushAll(nested.items, list)
+                out += pushAll(nested.items, list, repeated)
             }
             is WhileLoop -> {
-                nested.loop.body = block(pushAll(nested.items, list), unitType)
+                nested.loop.body = block(pushAll(nested.items, list, repeated = true), unitType)
                 out += nested.loop
             }
             is RepeatLoop -> {
                 (nested.action.body as IrBlockBody).statements.apply {
                     clear()
-                    addAll(pushAll(nested.items, list))
+                    addAll(pushAll(nested.items, list, repeated = true))
                 }
                 out += nested.call
             }
@@ -269,7 +275,10 @@ internal class ComponentEmitter(
         return block(out)
     }
 
-    private fun element(element: Element): IrExpression {
+    private fun element(
+        element: Element,
+        repeated: Boolean,
+    ): IrExpression {
         val out = mutableListOf<IrStatement>()
         val rawType = element.componentGetter?.let { getter ->
             val wrapper = element.call.arguments[0]!!
@@ -312,14 +321,14 @@ internal class ComponentEmitter(
             }
         }
         if (props.isNotEmpty()) attrs.value
-        val children = Children()
+        val children = Children(listFor(element.items, out))
         for (item in element.items) {
             if (item.attrsUses > 0) attrs.value
             emit(item, out, children)
         }
-        setChildren(attrs.value, children.nodes, out)
-        val key = children.key ?: element.defaultKey ?: sourceKey(element.call)
-        out += jsx(type, b.irGet(attrs.value), attrsType, key, staticChildren = children.nodes.size > 1)
+        setChildren(attrs.value, children, out)
+        val key = children.key ?: element.defaultKey ?: sourceKey(element.call).takeUnless { repeated }
+        out += jsx(type, b.irGet(attrs.value), attrsType, key, children.static)
         return block(out)
     }
 
@@ -334,29 +343,28 @@ internal class ComponentEmitter(
         return b.irWhen(symbols.reactNode, branches + fallback)
     }
 
+    /** `null`, the only child, or a Fragment of [children]; never a bare array, which React reads as a list to key. */
     private fun nodeOf(
-        children: List<IrExpression>,
+        children: Children,
         out: MutableList<IrStatement>,
-    ): IrExpression =
-        when (children.size) {
-            0 -> b.irNull(symbols.reactNode)
-            1 -> children.single()
-            else -> {
-                val attrs = local("attrs", b.irImplicitCast(b.irJs(symbols, "({})"), symbols.fragmentProps), out)
-                setChildren(attrs, children, out)
-                jsx(b.irCall(symbols.fragment), b.irGet(attrs), attrs.type, null, staticChildren = true)
-            }
-        }
+    ): IrExpression {
+        if (!children.static) return children.nodes.singleOrNull() ?: b.irNull(symbols.reactNode)
+        val attrs = local("attrs", b.irImplicitCast(b.irJs(symbols, "({})"), symbols.fragmentProps), out)
+        setChildren(attrs, children, out)
+        return jsx(b.irCall(symbols.fragment), b.irGet(attrs), attrs.type, null, staticChildren = true)
+    }
 
     private fun setChildren(
         attrs: IrVariable,
-        children: List<IrExpression>,
+        children: Children,
         out: MutableList<IrStatement>,
     ) {
-        if (children.isEmpty()) return
+        val nodes = children.nodes
+        val value = children.list?.let { b.irGet(it) }
+            ?: if (nodes.size > 1) b.irVararg(symbols.reactNode, nodes) else nodes.singleOrNull() ?: return
         out += b.irCall(symbols.childrenSetter).apply {
             arguments[0] = b.irGet(attrs)
-            arguments[1] = children.singleOrNull() ?: b.irVararg(symbols.reactNode, children)
+            arguments[1] = value
         }
     }
 
@@ -442,15 +450,29 @@ internal class ComponentEmitter(
     }
 }
 
-/** What a list of items adds: its child nodes, in order, and in an element body the explicit `key`. */
-private open class Children {
+/**
+ * What a list of items adds, and in an element body the explicit `key`: its child [nodes] in order, or, with a [list],
+ * statements pushing them onto that array. [repeated] when they are pushed from a loop, once per iteration.
+ */
+private class Children(
+    val list: IrVariable?,
+    val repeated: Boolean = false,
+) {
     val nodes = mutableListOf<IrExpression>()
     var key: IrExpression? = null
 
-    open fun add(node: IrExpression) {
-        nodes += node
-    }
+    /** Whether React gets them as static children through `jsxs`: several, or an array built at run time. */
+    val static get() = list != null || nodes.size > 1
 }
+
+/** Whether this adds children from a loop, directly or through a branch or block: as many as it runs. */
+private fun Item.addsLoop(): Boolean =
+    when (this) {
+        is WhileLoop, is RepeatLoop -> true
+        is Choice -> branches.any { branch -> branch.items.any { it.addsLoop() } }
+        is LetBlock -> items.any { it.addsLoop() }
+        else -> false
+    }
 
 /** A value class or a nullable one, which Kotlin/JS passes unboxed. */
 private fun IrType.isValueClass(): Boolean =

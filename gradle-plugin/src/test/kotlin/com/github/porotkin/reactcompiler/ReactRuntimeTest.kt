@@ -159,6 +159,104 @@ class ReactRuntimeTest : PluginTest() {
         )
     }
 
+    @Test
+    fun `renders loop children as static children without key warnings in React 19`() {
+        TestProject(dir, realReact = true).apply {
+            module(
+                "app",
+                """
+                @file:OptIn(kotlin.js.ExperimentalJsExport::class)
+                @file:Suppress("REACT_ONLY_EXPORT_COMPONENTS")
+
+                package app
+
+                import react.*
+
+                external interface ListProps : Props {
+                    var items: Array<String>
+                }
+
+                private val ul: ElementType<FragmentProps> = "ul".unsafeCast<ElementType<FragmentProps>>()
+                private val li: ElementType<FragmentProps> = "li".unsafeCast<ElementType<FragmentProps>>()
+
+                private fun ChildrenBuilder.Items(items: Array<String>) {
+                    for (item in items) li { +item }
+                }
+
+                val OnlyLoop: FC<ListProps> = FC { props ->
+                    ul {
+                        for (item in props.items) li { +item }
+                    }
+                }
+
+                val LoopWithSiblings: FC<ListProps> = FC { props ->
+                    ul {
+                        li { +"first" }
+                        for (item in props.items) li { +item }
+                        li { +"last" }
+                    }
+                }
+
+                val NestedLoops: FC<ListProps> = FC { props ->
+                    ul {
+                        if (props.items.size > 1) {
+                            repeat(props.items.size) { index -> li { +props.items[index] } }
+                        }
+                        props.items.takeIf { it.isNotEmpty() }?.let { items ->
+                            for (item in items) li { +item }
+                        }
+                    }
+                }
+
+                val RootLoop: FC<ListProps> = FC { props ->
+                    for (item in props.items) li { +item }
+                }
+
+                val HelperLoop: FC<ListProps> = FC { props ->
+                    ul { Items(props.items) }
+                }
+
+                @JsExport
+                fun listComponents(): Array<Any> = arrayOf(OnlyLoop, LoopWithSiblings, NestedLoops, RootLoop, HelperLoop)
+                """,
+            )
+        }.run(":app:compileDevelopmentExecutableKotlinJs")
+
+        val output = runWithReactCompiler(
+            "app",
+            """
+            const html = [];
+            for (const component of m.listComponents()) {
+              const container = document.createElement('div');
+              document.body.appendChild(container);
+              const root = createRoot(container);
+              for (const items of [['a', 'b'], ['a', 'b', 'c']]) {
+                await act(async () => {
+                  root.render(React.createElement(component, { items }));
+                });
+              }
+              html.push(container.innerHTML);
+              await act(async () => root.unmount());
+            }
+            console.log(JSON.stringify({ compiled, consoleErrors, html }));
+            """.trimIndent(),
+        )
+
+        for (name in listOf("OnlyLoop", "LoopWithSiblings", "NestedLoops", "RootLoop", "HelperLoop")) {
+            assertTrue("$name\$lambda" in output, "Expected $name compiled by React Compiler in:\n$output")
+        }
+        assertTrue(""""consoleErrors":[]""" in output, "Expected no key warnings for loop children in:\n$output")
+        assertTrue(
+            """"html":[""" +
+                """"<ul><li>a</li><li>b</li><li>c</li></ul>",""" +
+                """"<ul><li>first</li><li>a</li><li>b</li><li>c</li><li>last</li></ul>",""" +
+                """"<ul><li>a</li><li>b</li><li>c</li><li>a</li><li>b</li><li>c</li></ul>",""" +
+                """"<li>a</li><li>b</li><li>c</li>",""" +
+                """"<ul><li>a</li><li>b</li><li>c</li></ul>"]""" in output,
+            "Expected every loop child rendered in order in:\n$output",
+        )
+    }
+
     /**
      * Copies the compiled `.mjs` bundle for [module] into a working directory under `testNodeDir`, compiles the
      * module with `babel-plugin-react-compiler` (`annotation` mode, React 19 target), and runs [script] in Node with

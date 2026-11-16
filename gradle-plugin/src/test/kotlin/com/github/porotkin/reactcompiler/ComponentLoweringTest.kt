@@ -322,7 +322,7 @@ class ComponentLoweringTest : PluginTest() {
     }
 
     @Test
-    fun `pushes loop children onto arrays and passes an explicit key to jsx`() {
+    fun `pushes loop children onto one static children array and passes an explicit key to jsx`() {
         val mjs = compile(
             """
             interface ItemProps : FragmentProps {
@@ -348,9 +348,13 @@ class ComponentLoweringTest : PluginTest() {
             """,
         )
 
-        val lists = Regex("""(list\w*)\.push\(""").findAll(mjs).map { it.groupValues[1] }.toSet()
-        assertTrue(lists.size == 2, "Expected for and repeat loop children pushed onto two arrays in:\n$mjs")
+        val lists = Regex("""(children\w*)\.push\(""").findAll(mjs).map { it.groupValues[1] }.toSet()
+        assertTrue(lists.size == 1, "Expected for and repeat loop children pushed onto one array in:\n$mjs")
+        // `jsx` would make React read the array as a list and ask its items for keys.
+        assertTrue(Regex("""jsxs\(type\w*, attrs\w*, '@rdk/\d+_\d+'\)""") in mjs, "Expected the array passed as static children to jsxs in:\n$mjs")
         assertTrue(Regex("""jsx\(type\w*, attrs\w*, entry\)""") in mjs, "Expected explicit key passed as 3rd argument to jsx in:\n$mjs")
+        // A source key would be the same for every item a loop adds.
+        assertTrue(Regex("""jsx\(type\w*, attrs\w*, null\)""") in mjs, "Expected no source key on an item a loop repeats in:\n$mjs")
     }
 
     @Test
@@ -626,7 +630,8 @@ class ComponentLoweringTest : PluginTest() {
             "console.log(JSON.stringify({ guardTree: m.renderMode('guard'), earlyTree: m.renderMode('early'), loopTree: m.renderMode('loop') }));",
         )
         assertTrue(""""guardTree":{"type":"span","props":{"children":"Guarded"}""" in output, "Unexpected guardTree in:\n$output")
-        assertTrue(""""earlyTree":{"type":"div","props":{"children":{"type":"span","props":{"children":"Early"}""" in output, "Unexpected earlyTree in:\n$output")
+        // With a loop in its body, the div collects every child in one array, as kotlin-react's builder does.
+        assertTrue(""""earlyTree":{"type":"div","props":{"children":[{"type":"span","props":{"children":"Early"}""" in output, "Unexpected earlyTree in:\n$output")
         assertTrue(""""loopTree":{"type":"div","props":{"children":[{"type":"span","props":{"children":"0"},"key":"item-0"},{"type":"span","props":{"children":"1"},"key":"item-1"}]}""" in output, "Unexpected loopTree in:\n$output")
     }
 
