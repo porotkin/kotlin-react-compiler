@@ -45,6 +45,16 @@ class RenderLintTest : LintTest() {
                 return current.unsafeCast<ReactNode>()
             }
 
+            @com.github.porotkin.reactcompiler.ComponentWrapper
+            fun <P : Props> WrapComponent(render: ChildrenBuilder.(props: P) -> Unit): FC<P> =
+                memo(FC(render))
+
+            val WrappedAccess: FC<ListProps> = WrapComponent {
+                val ref = useRef<String>()
+                val current = ref.current // ! REACT_REFS
+                div { +"${'$'}current ${'$'}{DirectBadge()}" }
+            }
+
             val Reference: FC<ListProps> = FC {
                 val ref = useRef<String>()
                 val getter = ref::current // ! REACT_REFS

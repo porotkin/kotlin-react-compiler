@@ -1,10 +1,12 @@
 package com.github.porotkin.reactcompiler.lint
 
 import com.github.porotkin.reactcompiler.ReactSymbols
+import com.github.porotkin.reactcompiler.componentWrapperRenderParameter
 import com.github.porotkin.reactcompiler.isComponentFunction
 import com.github.porotkin.reactcompiler.isHookName
 import com.github.porotkin.reactcompiler.isOnBuilder
 import com.github.porotkin.reactcompiler.optsOutOfMemo
+import com.github.porotkin.reactcompiler.renderBuilderParameter
 import com.github.porotkin.reactcompiler.rendersComponent
 import org.jetbrains.kotlin.ir.declarations.IrDeclarationParent
 import org.jetbrains.kotlin.ir.declarations.IrFunction
@@ -18,7 +20,6 @@ import org.jetbrains.kotlin.ir.expressions.IrFunctionExpression
 import org.jetbrains.kotlin.ir.symbols.IrReturnTargetSymbol
 import org.jetbrains.kotlin.ir.symbols.IrSimpleFunctionSymbol
 import org.jetbrains.kotlin.ir.symbols.IrValueSymbol
-import org.jetbrains.kotlin.ir.types.classOrNull
 import org.jetbrains.kotlin.ir.util.fqNameWhenAvailable
 import org.jetbrains.kotlin.ir.util.isFunction
 import org.jetbrains.kotlin.ir.util.isFunctionMarker
@@ -59,7 +60,8 @@ internal class RenderScope(
 
     fun frameFor(expression: IrFunctionExpression): Frame {
         val function = expression.function
-        val scope = lambdaScopes.remove(expression) ?: if (function.isRenderLambda()) Scope.COMPONENT else Scope.CALLBACK
+        val scope = lambdaScopes.remove(expression)
+            ?: if (function.renderBuilderParameter(symbols) != null) Scope.COMPONENT else Scope.CALLBACK
         return Frame(scope, function, scope == Scope.COMPONENT, function.optsOutOfMemo(symbols))
     }
 
@@ -139,14 +141,16 @@ internal class RenderScope(
         parameter: IrValueParameter,
         lambda: IrSimpleFunction,
     ): Scope {
-        if (call.symbol in symbols.componentFactories) return Scope.COMPONENT
+        if (call.symbol in symbols.componentFactories || callee.componentWrapperRenderParameter(symbols) == parameter) {
+            return Scope.COMPONENT
+        }
         val receiver = lambda.parameters.firstOrNull { it.kind == IrParameterKind.ExtensionReceiver }?.type
         val buildsElement = receiver != null && (receiver.isSubtypeOfClass(symbols.propsClass) || receiver.isSubtypeOfClass(symbols.childrenBuilderClass))
         return when {
             // `div { }`, `Provider(value) { }`, `@ElementWrapper`: the body of an element being added to a builder.
             buildsElement && call.isOnBuilder(symbols) -> Scope.BLOCK
             // A render lambda given to anything else is somebody's component.
-            lambda.isRenderLambda() -> Scope.COMPONENT
+            lambda.renderBuilderParameter(symbols) != null -> Scope.COMPONENT
             // `Component.create { }`: the props of an element created on the spot.
             buildsElement -> Scope.BLOCK
             callee.fqNameWhenAvailable in RUN_ONCE_FUNCTIONS -> Scope.BLOCK
@@ -156,10 +160,6 @@ internal class RenderScope(
             else -> Scope.CALLBACK
         }
     }
-
-    /** `ChildrenBuilder.(...) -> Unit`: the lambda of a component, as `FC` takes it. */
-    private fun IrFunction.isRenderLambda(): Boolean =
-        parameters.any { it.kind == IrParameterKind.ExtensionReceiver && it.type.classOrNull == symbols.childrenBuilderClass }
 
     /** Where the code being visited runs, found from the innermost frame outwards. */
     fun site(): Site {
@@ -205,7 +205,7 @@ internal class RenderScope(
 
 /** How the code of a function runs, relative to the function around it. */
 internal enum class Scope {
-    /** The body of a component: an `FC` lambda, or a function that builds children or is named like a component. */
+    /** The body of a component: an `FC` or wrapper lambda, or a function that builds children or is named like a component. */
     COMPONENT,
 
     /** The body of a function named `use…`. */
