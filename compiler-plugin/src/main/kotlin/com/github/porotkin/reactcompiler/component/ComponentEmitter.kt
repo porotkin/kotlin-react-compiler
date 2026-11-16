@@ -407,7 +407,7 @@ internal class ComponentEmitter(
             receiver = IrDynamicMemberExpressionImpl(
                 startOffset = b.startOffset,
                 endOffset = b.endOffset,
-                type = symbols.js.owner.returnType,
+                type = symbols.dynamicType,
                 memberName = member,
                 receiver = target,
             )

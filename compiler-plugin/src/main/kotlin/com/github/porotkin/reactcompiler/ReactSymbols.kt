@@ -31,6 +31,7 @@ internal class ReactSymbols private constructor(
     private val finder: DeclarationFinder,
 ) {
     val js = function(KOTLIN_JS, "js")
+    val dynamicType: IrType get() = js.owner.returnType
 
     /** `run(block)`, as opposed to `T.run(block)`. */
     val run = function(KOTLIN, "run") { it.owner.parameters.size == 1 }
