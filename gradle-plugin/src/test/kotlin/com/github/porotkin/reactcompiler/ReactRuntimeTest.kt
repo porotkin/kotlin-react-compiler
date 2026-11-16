@@ -350,6 +350,77 @@ class ReactRuntimeTest : PluginTest() {
         assertCrossFileChildrenKeyedApart(seskar = true)
     }
 
+    @Test
+    fun `runs suspend lambdas passed to custom hooks that capture a ref in React 19`() {
+        TestProject(dir, realReact = true).apply {
+            module(
+                "app",
+                """
+                @file:OptIn(kotlin.js.ExperimentalJsExport::class)
+                @file:Suppress("REACT_ONLY_EXPORT_COMPONENTS")
+
+                package app
+
+                import kotlinx.coroutines.CoroutineScope
+                import kotlinx.coroutines.CoroutineStart
+                import kotlinx.coroutines.isActive
+                import kotlinx.coroutines.launch
+                import react.*
+
+                private val div: ElementType<FragmentProps> = "div".unsafeCast<ElementType<FragmentProps>>()
+
+                fun useAsyncEffect(key: Any?, block: suspend () -> Unit) {
+                    useEffect(key) { block() }
+                }
+
+                fun useKeyedEffect(key: String, block: suspend (String) -> Unit) {
+                    useEffect(key) { block(key) }
+                }
+
+                fun useLaunch(key: Any?, block: suspend CoroutineScope.() -> Unit) {
+                    useEffect(key) { launch(start = CoroutineStart.UNDISPATCHED, block = block) }
+                }
+
+                external interface PageProps : Props {
+                    var title: String
+                }
+
+                @JsExport
+                fun page(): Any = Page
+                val Page: FC<PageProps> = FC { props ->
+                    val seen = useRef("")
+                    useAsyncEffect(props.title) {
+                        seen.current = props.title
+                        console.log("async:" + seen.current)
+                    }
+                    useKeyedEffect(props.title) { key -> console.log("keyed:" + key + ":" + seen.current) }
+                    useLaunch(props.title) { console.log("launched:" + isActive + ":" + seen.current) }
+                    div { +props.title }
+                }
+                """,
+            )
+        }.run(":app:compileDevelopmentExecutableKotlinJs")
+
+        val output = runWithReactCompiler(
+            "app",
+            """
+            const container = document.createElement('div');
+            document.body.appendChild(container);
+            const root = createRoot(container);
+            await act(async () => {
+              root.render(React.createElement(m.page(), { title: 'Hello' }));
+            });
+            console.log(JSON.stringify({ compiled, consoleErrors, html: container.innerHTML }));
+            """.trimIndent(),
+        )
+
+        assertTrue(""""compiled":["useAsyncEffect","useKeyedEffect","useLaunch","Page${'$'}lambda"]""" in output, "Expected all compiled in:\n$output")
+        assertTrue("async:Hello" in output, "Expected the ref written by the suspend lambda in:\n$output")
+        assertTrue("keyed:Hello:Hello" in output, "Expected the suspend lambda called with its parameter in:\n$output")
+        assertTrue("launched:true:Hello" in output, "Expected the suspend lambda started by launch in:\n$output")
+        assertTrue(""""consoleErrors":[]""" in output, "Expected no React errors in:\n$output")
+    }
+
     private fun assertCrossFileChildrenKeyedApart(seskar: Boolean) {
         TestProject(dir, realReact = true, seskar = seskar).apply {
             // `b` in Panel and `i` in Page both start at line 14, column 8 of their files: the plugin keys them by it,

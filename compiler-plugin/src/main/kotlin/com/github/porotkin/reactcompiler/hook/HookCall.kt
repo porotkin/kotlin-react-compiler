@@ -42,6 +42,7 @@ import org.jetbrains.kotlin.ir.types.isUnit
 import org.jetbrains.kotlin.ir.types.typeOrNull
 import org.jetbrains.kotlin.ir.types.typeWith
 import org.jetbrains.kotlin.ir.util.deepCopyWithSymbols
+import org.jetbrains.kotlin.ir.util.functions
 import org.jetbrains.kotlin.ir.util.isFunction
 import org.jetbrains.kotlin.ir.util.isKFunction
 import org.jetbrains.kotlin.ir.util.patchDeclarationParents
@@ -49,6 +50,8 @@ import org.jetbrains.kotlin.ir.visitors.IrElementTransformerVoid
 import org.jetbrains.kotlin.ir.visitors.transformChildrenVoid
 import org.jetbrains.kotlin.name.Name
 import org.jetbrains.kotlin.name.SpecialNames
+import org.jetbrains.kotlin.name.StandardClassIds
+import org.jetbrains.kotlin.util.OperatorNameConventions
 
 /**
  * One kotlin-react hook call being rewritten into the shape React Compiler takes: built with [b] at the call's
@@ -121,6 +124,45 @@ internal class HookCall(
         )
         val lambda = lambda(function, ref.expression)
         return if (lambda.type == type) lambda else b.irImplicitCast(lambda, type)
+    }
+
+    /**
+     * [suspendLambda] as a plain lambda that creates and calls it, taking its parameters and the continuation, cast back
+     * to its suspend function type: Kotlin/JS calls a suspend function value as a plain function with the continuation
+     * last. The `$slambda` Kotlin/JS emits for [suspendLambda] is then created, with the values it captures, when the
+     * callee calls it instead of during render, where React Compiler rejects a captured ref passed to its factory.
+     * The callee gets no suspend function metadata: an `is` check against a suspend function type fails on it.
+     */
+    fun deferSuspendLambda(suspendLambda: IrFunctionExpression): IrExpression {
+        val anyNType = context.irBuiltIns.anyNType
+        val type = suspendLambda.type as IrSimpleType
+        val typeArguments = type.arguments.map { it.typeOrNull ?: anyNType }
+        val parameterTypes = typeArguments.dropLast(1)
+        val continuationType = context.referenceClass(StandardClassIds.Continuation)!!.typeWith(typeArguments.last())
+        val functionClass = context.irBuiltIns.functionN(parameterTypes.size + 1)
+        val invoke = functionClass.functions.single { it.name == OperatorNameConventions.INVOKE }
+        val function = newFunction(suspendLambda, anyNType).apply {
+            parameterTypes.forEachIndexed { index, parameterType ->
+                addValueParameter {
+                    name = Name.identifier("p$index")
+                    this.type = parameterType
+                }
+            }
+            addValueParameter {
+                name = Name.identifier("completion")
+                this.type = continuationType
+            }
+        }
+        val fb = DeclarationIrBuilder(context, function.symbol, suspendLambda.startOffset, suspendLambda.endOffset)
+        function.body = fb.irBlockBody {
+            +irReturn(
+                irCall(invoke.symbol, anyNType).apply {
+                    arguments[0] = irImplicitCast(suspendLambda, functionClass.typeWith(parameterTypes + continuationType + anyNType))
+                    function.parameters.forEachIndexed { index, parameter -> arguments[index + 1] = irGet(parameter) }
+                },
+            )
+        }
+        return b.irImplicitCast(lambda(function, suspendLambda), type)
     }
 
     /** An empty function at the position of [source], to fill and pass to [lambda]. */

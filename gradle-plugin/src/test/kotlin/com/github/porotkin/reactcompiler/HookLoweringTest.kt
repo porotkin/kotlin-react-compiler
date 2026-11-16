@@ -191,6 +191,36 @@ class HookLoweringTest : PluginTest() {
     }
 
     @Test
+    fun `creates suspend lambdas passed to custom hooks when the hook calls them`() {
+        val mjs = compile(
+            """
+            fun useAsyncEffect(key: Any?, block: suspend (String) -> Unit) {
+                useEffect(key) { block("x") }
+            }
+
+            fun usePlain(block: suspend () -> Unit): Any = block
+
+            fun useLoader(title: String) {
+                val ref = useRef<String>(null)
+                useAsyncEffect(title) { ref.current = it + title }
+                val stored: suspend () -> Unit = { ref.current = title }
+                usePlain(stored)
+            }
+            """,
+        )
+
+        assertTrue(
+            Regex("""useAsyncEffect\(title, function \(p0, completion\) \{\s+return useLoader\$[\w$]+\(ref, title, null\)\(p0, completion\);\s+\}\);""") in mjs,
+            "Expected the suspend lambda created inside a plain function taking its parameter and the continuation in:\n$mjs"
+        )
+        assertTrue(Regex("""usePlain\(stored\)""") in mjs, "Expected a stored suspend lambda passed as it is in:\n$mjs")
+        assertTrue(
+            Regex("""useEffect\(function \(\) \{\s+return createCleanupCallback\(useAsyncEffect\$[\w$]+\(block, null\)\)\(\);""") in mjs,
+            "Expected kotlin-react's useEffect lowered to React's, not wrapped, in:\n$mjs"
+        )
+    }
+
+    @Test
     fun `lowers synchronous and suspending effects to direct React effect calls without Unit returns`() {
         val mjs = compile(
             """

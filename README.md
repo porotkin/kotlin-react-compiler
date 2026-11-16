@@ -76,6 +76,17 @@ executable too.
     return title.toUpperCase();
   }, [title])
   ```
+- **Suspend lambdas passed to custom hooks:** A suspend lambda passed to a `use*` hook parameter of a suspend function type is wrapped in a plain function that creates and calls it, so the coroutine object Kotlin/JS emits for the lambda, with the values it captures, is created when the hook calls it instead of during render, where React Compiler rejects a ref passed to it. The hook gets a plain function: an `is` check against a suspend function type fails on it. A suspend lambda stored in a variable first is still created during render. kotlin-react's effect hooks are lowered to React's own instead.
+
+  ```kotlin
+  val seen = useRef("")
+  useAsyncEffect(key) { seen.current = load() }
+  ```
+  ```js
+  useAsyncEffect(key, function (completion) {
+    return Page$lambda$slambda_0(seen, null)(completion);
+  });
+  ```
 - **Custom hook directive injection (`use*`):** Prepends `js("\"use memo\"")` to top-level, non-inline, non-suspend `use*` functions so React Compiler compiles them in `annotation` mode and preserves top-level hook calls inside hoisted `$lambda` helpers. Hooks that call `useMemo(*deps)` / `useCallback(*deps)` are skipped, since React Compiler rejects a dependency list that is not an array literal.
 
   ```kotlin
