@@ -99,4 +99,49 @@ class ReactCompilerPluginTest : PluginTest() {
         val mjs = dir.walkTopDown().first { it.name.endsWith("-app.mjs") }.readText()
         assertFalse("'use memo';" in mjs, "Expected lowering skipped cleanly in:\n$mjs")
     }
+
+    @Test
+    fun `configures inline anonymous functions on JS targets only even when applied before kotlin multiplatform`() {
+        val pluginId = System.getProperty("pluginId")
+        val pluginVersion = System.getProperty("pluginVersion")
+        val kotlinVersion = System.getProperty("kotlinVersion")
+        val repository = System.getProperty("testRepository")
+
+        File(dir, "settings.gradle.kts").writeText(
+            """
+            pluginManagement { repositories { maven("$repository"); gradlePluginPortal(); mavenCentral() } }
+            dependencyResolutionManagement { repositories { maven("$repository"); mavenCentral() } }
+            rootProject.name = "target-args-test"
+            """.trimIndent() + "\n",
+        )
+        File(dir, "build.gradle.kts").writeText(
+            """
+            plugins {
+                id("$pluginId") version "$pluginVersion"
+                kotlin("multiplatform") version "$kotlinVersion"
+            }
+            kotlin {
+                jvm()
+                js { browser() }
+            }
+            tasks.register("printTargetArgs") {
+                val jsArgs = kotlin.js().compilerOptions.freeCompilerArgs
+                val jvmArgs = kotlin.jvm().compilerOptions.freeCompilerArgs
+                doLast {
+                    println("JS_ARGS=" + jsArgs.get().count { it == "-Xir-generate-inline-anonymous-functions" })
+                    println("JVM_ARGS=" + jvmArgs.get().count { it == "-Xir-generate-inline-anonymous-functions" })
+                }
+            }
+            """.trimIndent() + "\n",
+        )
+
+        val output = GradleRunner.create()
+            .withProjectDir(dir)
+            .withArguments("printTargetArgs", "--stacktrace")
+            .build()
+            .output
+
+        assertTrue("JS_ARGS=1" in output, "Expected inline-lambdas flag configured once on JS target in:\n$output")
+        assertTrue("JVM_ARGS=0" in output, "Expected inline-lambdas flag not configured on JVM target in:\n$output")
+    }
 }
