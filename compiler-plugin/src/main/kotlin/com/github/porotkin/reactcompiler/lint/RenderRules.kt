@@ -2,6 +2,7 @@ package com.github.porotkin.reactcompiler.lint
 
 import com.github.porotkin.reactcompiler.ReactSymbols
 import com.github.porotkin.reactcompiler.any
+import com.github.porotkin.reactcompiler.isComponentName
 import com.github.porotkin.reactcompiler.isHookName
 import com.github.porotkin.reactcompiler.optsOutOfMemo
 import org.jetbrains.kotlin.ir.IrBuiltIns
@@ -136,7 +137,7 @@ internal class RenderRules(
     override fun visitSimpleFunction(declaration: IrSimpleFunction) {
         val scope = when {
             declaration.name.isHookName() -> Scope.HOOK
-            declaration.buildsChildren() || declaration.hasComponentName() -> Scope.COMPONENT
+            declaration.buildsChildren() || declaration.name.isComponentName() -> Scope.COMPONENT
             else -> Scope.OTHER
         }
         // A capitalized function is a component by its name only, so it is held to the rules of render only if it takes props.
@@ -870,10 +871,6 @@ private val IMPURE_MEMBERS = listOf(
 
 private fun IrSimpleFunction.isUse(): Boolean =
     name.asString() == "use" && fqNameWhenAvailable == USE
-
-/** React's convention: a function is a component when its name starts with a capital letter. */
-private fun IrSimpleFunction.hasComponentName(): Boolean =
-    !name.isSpecial && name.asString().first().isUpperCase()
 
 /**
  * Whether an inline function inlines the lambda passed for this parameter, and so runs it where it is written. It

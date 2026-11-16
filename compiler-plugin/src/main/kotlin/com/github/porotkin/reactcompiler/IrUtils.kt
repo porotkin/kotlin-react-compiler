@@ -34,6 +34,10 @@ private val HOOK_NAME = Regex("^use[A-Z0-9]")
 internal fun Name.isHookName(): Boolean =
     HOOK_NAME.containsMatchIn(asString())
 
+/** React's convention: a component is named with a capital letter. */
+internal fun Name.isComponentName(): Boolean =
+    !isSpecial && asString().first().isUpperCase()
+
 private val EAGER_INITIALIZATION = FqName("kotlin.js.EagerInitialization")
 
 /**
