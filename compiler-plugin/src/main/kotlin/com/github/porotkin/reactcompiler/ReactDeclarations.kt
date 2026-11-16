@@ -113,11 +113,19 @@ internal fun IrSimpleFunction.isElementBuilder(): Boolean =
 internal fun IrSimpleFunction.isChildrenBuilderMember(
     name: String,
     symbols: ReactSymbols,
-    arity: Int,
+    arity: Int? = null,
 ): Boolean =
     this.name.asString() == name &&
-        parameters.size == arity &&
+        (arity == null || parameters.size == arity) &&
         allOverridden(includeSelf = true).any { it.parentClassOrNull?.symbol == symbols.childrenBuilderClass }
+
+/** Whether [this] call adds a React element to a `ChildrenBuilder`: `@ElementBuilder`, `child(...)`, or `@ElementWrapper`. */
+internal fun IrCall.createsElement(symbols: ReactSymbols): Boolean =
+    isOnBuilder(symbols) && (
+        symbol.owner.isElementBuilder() ||
+            symbol.owner.isChildrenBuilderMember("child", symbols) ||
+            symbol.owner.isElementWrapper()
+    )
 
 /** Whether [this] call creates a React component (`FC`, `@ComponentWrapper`, `memo`, `forwardRef`, `lazy`). */
 internal fun IrCall.createsComponent(symbols: ReactSymbols): Boolean =

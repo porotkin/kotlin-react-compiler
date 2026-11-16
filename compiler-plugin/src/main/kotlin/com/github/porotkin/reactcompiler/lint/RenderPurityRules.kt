@@ -2,7 +2,7 @@ package com.github.porotkin.reactcompiler.lint
 
 import com.github.porotkin.reactcompiler.ReactSymbols
 import com.github.porotkin.reactcompiler.createsComponent
-import com.github.porotkin.reactcompiler.isOnBuilder
+import com.github.porotkin.reactcompiler.createsElement
 import org.jetbrains.kotlin.ir.IrBuiltIns
 import org.jetbrains.kotlin.ir.IrElement
 import org.jetbrains.kotlin.ir.declarations.IrClass
@@ -47,7 +47,7 @@ internal class RenderPurityRules(
                 "A component is created during render: every render makes a new one, and React resets its state. Declare the component at the top level of the file.",
             )
         }
-        if (site.tried && callee.name.asString() in ELEMENT_FUNCTIONS && call.isOnBuilder(symbols)) {
+        if (site.tried && call.createsElement(symbols)) {
             report(
                 LintRule.REACT_ERROR_BOUNDARIES,
                 call,
@@ -124,9 +124,6 @@ internal class RenderPurityRules(
 
 private val RANDOM = FqName("kotlin.random.Random")
 private val DATE_CLASSES = setOf(FqName("kotlin.js.Date"), FqName("js.date.Date"))
-
-/** What adds a child to a builder: `type { }` and `child(type, props)`. */
-private val ELEMENT_FUNCTIONS = setOf("invoke", "child")
 
 private val IMPURE_FUNCTIONS = setOf(
     "kotlin.collections.random",

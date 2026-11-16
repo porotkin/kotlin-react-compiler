@@ -155,11 +155,38 @@ class HookUsageLintTest : LintTest() {
                 div { +"${'$'}nothing" }
             }
 
+            interface BoxProps : PropsWithChildren {
+                var label: String
+            }
+
+            object Box {
+                val type: ElementType<BoxProps> = "div".unsafeCast<ElementType<BoxProps>>()
+
+                @com.github.porotkin.reactcompiler.ElementWrapper
+                operator fun ChildrenBuilder.invoke(
+                    label: String,
+                    block: ChildrenBuilder.() -> Unit,
+                ) {
+                    type {
+                        this.label = label
+                        block()
+                    }
+                }
+            }
+
+            operator fun FragmentProps.invoke(step: Int): Int = step
+
             val Guarded: FC<TitleProps> = FC { props ->
                 try {
                     Title { title = props.title } // ! REACT_ERROR_BOUNDARIES
+                    with(Box) { invoke(props.title) {} } // ! REACT_ERROR_BOUNDARIES
                 } catch (e: Throwable) {
-                    div { +"failed" }
+                    div {
+                        try {
+                            this(1)
+                        } catch (_: Throwable) {}
+                        +"failed"
+                    }
                 }
             }
             """,
