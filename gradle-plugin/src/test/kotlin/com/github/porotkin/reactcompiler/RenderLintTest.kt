@@ -105,6 +105,7 @@ class RenderLintTest : LintTest() {
                 var title: String
                 var settings: Settings
                 var items: MutableList<String>
+                var sheet: RefObject<Settings>
             }
 
             fun useControl(): Control = useMemo { Control() }
@@ -170,13 +171,21 @@ class RenderLintTest : LintTest() {
 
             val Allowed: FC<FormProps> = FC { props ->
                 val control = useControl()
+                val sheetRef = props.sheet
                 val local = Settings()
                 local.enabled = true
                 local.tags.add("tag")
                 val copy = props.items.toMutableList()
                 copy.add("item")
-                useEffect(control) { control.channel = props.title }
-                val onClick = { control.channel = null }
+                useEffect(control) {
+                    control.channel = props.title
+                    sheetRef.current?.enabled = true
+                }
+                val onClick = {
+                    control.channel = null
+                    val sheet = sheetRef.current
+                    if (sheet != null) sheet.enabled = false
+                }
                 div {
                     key = props.title
                     +"${'$'}local ${'$'}copy ${'$'}onClick"

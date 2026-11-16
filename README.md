@@ -147,7 +147,8 @@ What the rules mean by their terms:
   functions run later: for the Rules of Hooks they are nested functions, and the rules about render do not apply to
   them.
 - A value is known to be props, state or a hook result where it is declared, and through the `val`s, properties,
-  destructuring and scope functions that read from it.
+  destructuring and scope functions that read from it, up to a ref: what a ref holds is not part of the props or state
+  that passed the ref in.
 
 The linter follows the code as it is written. It does not look into the functions a component calls, and does not
 follow a value through anything but the above, so React Compiler, which analyzes the generated JavaScript further, still

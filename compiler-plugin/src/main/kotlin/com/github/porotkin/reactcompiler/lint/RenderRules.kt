@@ -553,7 +553,7 @@ internal class RenderRules(
         isRender: Boolean,
     ) {
         val receiver = call.receiver() ?: return
-        if (!callee.isSetter && !callee.isMutatorOf(receiver.type) || lint.isRef(receiver.type)) return
+        if (!callee.isSetter && !callee.isMutatorOf(receiver.type)) return
         val what = if (callee.isSetter) "`${callee.correspondingPropertySymbol!!.owner.name}` is assigned" else "`${callee.name}()` is called"
         val message = when (receiver.immutability()) {
             Immutability.SNAPSHOT -> "$what on props or state, which are snapshots of one render and must not be modified. Create a new value: pass it to the state setter, or to the child as a prop."
@@ -574,12 +574,14 @@ internal class RenderRules(
      * properties, destructuring, casts and `!!`, which all lead into the same object.
      */
     private fun IrExpression.immutability(): Immutability =
-        when (this) {
-            is IrGetValue -> if (symbol in snapshots) Immutability.SNAPSHOT else if (symbol in frozen) Immutability.FROZEN else Immutability.NONE
-            is IrTypeOperatorCall -> argument.immutability()
-            is IrContainerExpression -> (statements.lastOrNull() as? IrExpression)?.immutability() ?: Immutability.NONE
-            is IrWhen -> branches.maxOf { it.result.immutability() }
-            is IrCall -> {
+        when {
+            // A ref is a mutable box, and what it holds is not part of the props, state or hook result that passed it on.
+            lint.isRef(type) -> Immutability.NONE
+            this is IrGetValue -> if (symbol in snapshots) Immutability.SNAPSHOT else if (symbol in frozen) Immutability.FROZEN else Immutability.NONE
+            this is IrTypeOperatorCall -> argument.immutability()
+            this is IrContainerExpression -> (statements.lastOrNull() as? IrExpression)?.immutability() ?: Immutability.NONE
+            this is IrWhen -> branches.maxOf { it.result.immutability() }
+            this is IrCall -> {
                 val callee = symbol.owner
                 val local = delegated[symbol]
                 val receiver = receiver()
