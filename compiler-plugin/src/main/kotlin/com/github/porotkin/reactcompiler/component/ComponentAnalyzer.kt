@@ -1,8 +1,11 @@
 package com.github.porotkin.reactcompiler.component
 
 import com.github.porotkin.reactcompiler.ReactSymbols
+import com.github.porotkin.reactcompiler.SET_DEFAULT_KEY
 import com.github.porotkin.reactcompiler.any
 import com.github.porotkin.reactcompiler.count
+import com.github.porotkin.reactcompiler.isChildrenBuilderMember
+import com.github.porotkin.reactcompiler.isElementBuilder
 import com.github.porotkin.reactcompiler.unwrapCoercion
 import org.jetbrains.kotlin.ir.IrElement
 import org.jetbrains.kotlin.ir.IrStatement
@@ -32,20 +35,15 @@ import org.jetbrains.kotlin.ir.types.IrTypeProjection
 import org.jetbrains.kotlin.ir.types.classOrNull
 import org.jetbrains.kotlin.ir.types.classifierOrNull
 import org.jetbrains.kotlin.ir.types.isUnit
-import org.jetbrains.kotlin.ir.util.allOverridden
 import org.jetbrains.kotlin.ir.util.fqNameWhenAvailable
-import org.jetbrains.kotlin.ir.util.hasAnnotation
 import org.jetbrains.kotlin.ir.util.isSubtypeOfClass
 import org.jetbrains.kotlin.ir.util.parentAsClass
-import org.jetbrains.kotlin.ir.util.parentClassOrNull
 import org.jetbrains.kotlin.ir.util.substitute
 import org.jetbrains.kotlin.ir.visitors.IrVisitorVoid
 import org.jetbrains.kotlin.ir.visitors.acceptChildrenVoid
 import org.jetbrains.kotlin.ir.visitors.acceptVoid
 import org.jetbrains.kotlin.name.FqName
 
-private val ELEMENT_BUILDER = FqName("react.ElementBuilder")
-private val SET_DEFAULT_KEY = FqName("react.setDefaultKey")
 private val KOTLIN_REPEAT = FqName("kotlin.repeat")
 private val KOTLIN_LET = FqName("kotlin.let")
 private val KOTLIN_RUN = FqName("kotlin.run")
@@ -293,29 +291,19 @@ internal class ComponentAnalyzer(
 
         /** `type { }` / `type()` / `provider(value) { }` / `wrapper(props...) { }`: an element `invoke` on this scope's builder. */
         private fun IrCall.isElementInvoke(): Boolean =
-            symbol.owner.name.asString() == "invoke" &&
-                (
-                    arguments.size in 2..4 &&
-                        isOnReceiver() &&
-                        arguments[1]?.type?.isSubtypeOfClass(symbols.elementTypeClass) == true &&
-                        symbol.owner.allOverridden(includeSelf = true).any { it.hasAnnotation(ELEMENT_BUILDER) } ||
-                        (arguments.getOrNull(1) as? IrGetValue)?.symbol == receiver &&
-                        ElementWrappers.resolve(symbol.owner, symbols) != null
-                )
+            arguments.size in 2..4 &&
+                isOnReceiver() &&
+                arguments[1]?.type?.isSubtypeOfClass(symbols.elementTypeClass) == true &&
+                symbol.owner.isElementBuilder() ||
+                symbol.owner.name.asString() == "invoke" &&
+                (arguments.getOrNull(1) as? IrGetValue)?.symbol == receiver &&
+                ElementWrappers.resolve(symbol.owner, symbols) != null
 
         private fun IrCall.isUnaryPlus(): Boolean =
-            isChildrenBuilderMember("unaryPlus", arity = 2)
+            symbol.owner.isChildrenBuilderMember("unaryPlus", symbols, arity = 2)
 
         private fun IrCall.isChildWithProps(): Boolean =
-            isChildrenBuilderMember("child", arity = 3)
-
-        private fun IrCall.isChildrenBuilderMember(
-            name: String,
-            arity: Int,
-        ): Boolean =
-            symbol.owner.name.asString() == name &&
-                arguments.size == arity &&
-                symbol.owner.allOverridden(includeSelf = true).any { it.parentClassOrNull?.symbol == symbols.childrenBuilderClass }
+            symbol.owner.isChildrenBuilderMember("child", symbols, arity = 3)
 
         private fun IrCall.isOnReceiver(): Boolean =
             (arguments.getOrNull(0) as? IrGetValue)?.symbol == receiver

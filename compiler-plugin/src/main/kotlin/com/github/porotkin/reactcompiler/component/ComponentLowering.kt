@@ -5,19 +5,18 @@ import com.github.porotkin.reactcompiler.ReactSymbols
 import com.github.porotkin.reactcompiler.lint.LintReporter
 import com.github.porotkin.reactcompiler.lint.LintRule
 import com.github.porotkin.reactcompiler.optsOutOfMemo
+import com.github.porotkin.reactcompiler.renderBuilderParameter
 import com.github.porotkin.reactcompiler.reportInfo
 import org.jetbrains.kotlin.backend.common.extensions.IrPluginContext
 import org.jetbrains.kotlin.ir.IrStatement
 import org.jetbrains.kotlin.ir.builders.irImplicitCast
 import org.jetbrains.kotlin.ir.declarations.IrFile
 import org.jetbrains.kotlin.ir.declarations.IrFunction
-import org.jetbrains.kotlin.ir.declarations.IrParameterKind
 import org.jetbrains.kotlin.ir.declarations.IrSimpleFunction
 import org.jetbrains.kotlin.ir.declarations.IrValueParameter
 import org.jetbrains.kotlin.ir.expressions.IrCall
 import org.jetbrains.kotlin.ir.expressions.IrExpression
 import org.jetbrains.kotlin.ir.expressions.IrFunctionExpression
-import org.jetbrains.kotlin.ir.types.classOrNull
 import org.jetbrains.kotlin.ir.types.typeWith
 import org.jetbrains.kotlin.ir.visitors.transformChildrenVoid
 
@@ -68,9 +67,7 @@ internal class ComponentLowering(
     /** Rewrites a `ChildrenBuilder.(props) -> Unit` lambda into a `(props) -> ReactNode?` one, if its body can be. */
     private fun lowerLambda(lambda: IrFunctionExpression): Boolean {
         val fn = lambda.function
-        val builder = fn.parameters.singleOrNull {
-            it.kind == IrParameterKind.ExtensionReceiver && it.type.classOrNull == symbols.childrenBuilderClass
-        } ?: return false
+        val builder = fn.renderBuilderParameter(symbols) ?: return false
         val items = helpers.analyzer.analyze(fn, builder.symbol)
         if (items == null) {
             val problem = "The plugin cannot lower this code: its component stays as it is, and React Compiler does not memoize it"

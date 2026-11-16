@@ -4,15 +4,13 @@ import com.github.porotkin.reactcompiler.ReactSymbols
 import com.github.porotkin.reactcompiler.any
 import com.github.porotkin.reactcompiler.callsUnloweredHook
 import com.github.porotkin.reactcompiler.isHookName
+import com.github.porotkin.reactcompiler.renderBuilderParameter
 import org.jetbrains.kotlin.descriptors.DescriptorVisibilities
 import org.jetbrains.kotlin.ir.declarations.IrFile
-import org.jetbrains.kotlin.ir.declarations.IrParameterKind
 import org.jetbrains.kotlin.ir.declarations.IrSimpleFunction
 import org.jetbrains.kotlin.ir.declarations.IrValueParameter
 import org.jetbrains.kotlin.ir.expressions.IrCall
 import org.jetbrains.kotlin.ir.symbols.IrSimpleFunctionSymbol
-import org.jetbrains.kotlin.ir.types.classOrNull
-import org.jetbrains.kotlin.ir.types.isUnit
 import org.jetbrains.kotlin.ir.util.deepCopyWithSymbols
 import org.jetbrains.kotlin.name.Name
 
@@ -111,10 +109,5 @@ private data class Helper(
     val items: List<Item>,
 )
 
-private fun IrSimpleFunction.isHelperCandidate(symbols: ReactSymbols): Boolean {
-    val receiver = parameters.firstOrNull() ?: return false
-    return visibility == DescriptorVisibilities.PRIVATE &&
-        returnType.isUnit() &&
-        receiver.kind == IrParameterKind.ExtensionReceiver &&
-        receiver.type.classOrNull == symbols.childrenBuilderClass
-}
+private fun IrSimpleFunction.isHelperCandidate(symbols: ReactSymbols): Boolean =
+    visibility == DescriptorVisibilities.PRIVATE && (renderBuilderParameter(symbols)?.let { it == parameters.firstOrNull() } == true)

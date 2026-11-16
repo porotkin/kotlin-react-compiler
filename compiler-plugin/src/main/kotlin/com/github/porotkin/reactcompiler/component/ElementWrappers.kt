@@ -1,6 +1,9 @@
 package com.github.porotkin.reactcompiler.component
 
 import com.github.porotkin.reactcompiler.ReactSymbols
+import com.github.porotkin.reactcompiler.SET_DEFAULT_KEY
+import com.github.porotkin.reactcompiler.isElementBuilder
+import com.github.porotkin.reactcompiler.isElementWrapper
 import com.github.porotkin.reactcompiler.isStamped
 import com.github.porotkin.reactcompiler.reportError
 import com.github.porotkin.reactcompiler.stamp
@@ -37,15 +40,11 @@ import org.jetbrains.kotlin.ir.types.classOrNull
 import org.jetbrains.kotlin.ir.types.isUnit
 import org.jetbrains.kotlin.ir.util.allOverridden
 import org.jetbrains.kotlin.ir.util.fqNameWhenAvailable
-import org.jetbrains.kotlin.ir.util.hasAnnotation
 import org.jetbrains.kotlin.ir.util.isSubtypeOfClass
 import org.jetbrains.kotlin.ir.util.substitute
 import org.jetbrains.kotlin.name.FqName
 import org.jetbrains.kotlin.name.Name
 
-private val ELEMENT_WRAPPER = FqName("com.github.porotkin.reactcompiler.ElementWrapper")
-private val ELEMENT_BUILDER = FqName("react.ElementBuilder")
-private val SET_DEFAULT_KEY = FqName("react.setDefaultKey")
 private val KOTLIN_WITH = FqName("kotlin.with")
 private val FUNCTION_1 = FqName("kotlin.Function1")
 
@@ -66,7 +65,7 @@ internal object ElementWrappers {
         context: IrPluginContext,
         symbols: ReactSymbols,
     ) {
-        if (!function.hasAnnotation(ELEMENT_WRAPPER)) return
+        if (!function.isElementWrapper()) return
         val signature = signatureOf(function, symbols)
             ?: return report(
                 context,
@@ -95,7 +94,7 @@ internal object ElementWrappers {
         function: IrSimpleFunction,
         symbols: ReactSymbols,
     ): VerifiedWrapper? {
-        if (!function.hasAnnotation(ELEMENT_WRAPPER)) return null
+        if (!function.isElementWrapper()) return null
         val signature = signatureOf(function, symbols) ?: return null
         val propSetters = signature.propParameters.map { signature.propsClass.writablePropertySetter(it.name) ?: return null }
         val verified = if (function.body != null) hasValidBody(function, signature, propSetters) else function.isStamped()
@@ -153,10 +152,9 @@ internal object ElementWrappers {
         val (activeBuilder, elementStatement) = unwrapWithBuilder(outer.single(), signature.builderParameter.symbol) ?: return false
         val elementCall = elementStatement.unwrapKeyedComposite(activeBuilder) as? IrCall ?: return false
         if (
-            elementCall.symbol.owner.name.asString() != "invoke" ||
             elementCall.arguments.size != 3 ||
             (elementCall.arguments[0] as? IrGetValue)?.symbol != activeBuilder ||
-            elementCall.symbol.owner.allOverridden(includeSelf = true).none { it.hasAnnotation(ELEMENT_BUILDER) }
+            !elementCall.symbol.owner.isElementBuilder()
         ) {
             return false
         }

@@ -1,7 +1,7 @@
 package com.github.porotkin.reactcompiler.lint
 
 import com.github.porotkin.reactcompiler.ReactSymbols
-import com.github.porotkin.reactcompiler.isComponentName
+import com.github.porotkin.reactcompiler.isComponentProperty
 import org.jetbrains.kotlin.descriptors.DescriptorVisibilities
 import org.jetbrains.kotlin.ir.declarations.IrClass
 import org.jetbrains.kotlin.ir.declarations.IrDeclaration
@@ -11,7 +11,6 @@ import org.jetbrains.kotlin.ir.declarations.IrFile
 import org.jetbrains.kotlin.ir.declarations.IrProperty
 import org.jetbrains.kotlin.ir.declarations.IrSimpleFunction
 import org.jetbrains.kotlin.ir.util.isEffectivelyExternal
-import org.jetbrains.kotlin.ir.util.isSubtypeOfClass
 
 /**
  * [LintRule.REACT_ONLY_EXPORT_COMPONENTS]: a file that exports a component exports nothing else.
@@ -29,11 +28,11 @@ internal class ComponentExports(
 ) {
     fun check() {
         val exports = file.declarations.filter { it.isExported() }
-        val component = exports.firstOrNull { it.isComponent() } ?: return
+        val component = exports.firstOrNull { it.isComponentProperty(symbols) } ?: return
         for (export in exports) {
             if (export == component) continue
             val name = (export as IrDeclarationWithName).name
-            val problem = if (export.isComponent()) "is a second component exported from this file" else "is exported from a file that exports the component `${(component as IrProperty).name}`"
+            val problem = if (export.isComponentProperty(symbols)) "is a second component exported from this file" else "is exported from a file that exports the component `${(component as IrProperty).name}`"
             val message = "`$name` $problem, which turns Fast Refresh off for the file. Make it private, or move it to a file of its own."
             reporter.report(LintRule.REACT_ONLY_EXPORT_COMPONENTS, file, export, message)
         }
@@ -43,8 +42,4 @@ internal class ComponentExports(
         val isRuntimeDeclaration = this is IrProperty || this is IrSimpleFunction || this is IrClass
         return isRuntimeDeclaration && (this as IrDeclarationWithVisibility).visibility != DescriptorVisibilities.PRIVATE && !isEffectivelyExternal()
     }
-
-    private fun IrDeclaration.isComponent(): Boolean =
-        this is IrProperty && name.isComponentName() && getter?.parameters.isNullOrEmpty() &&
-            (getter?.returnType ?: backingField?.type)?.isSubtypeOfClass(symbols.fcClass) == true
 }
