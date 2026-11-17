@@ -20,6 +20,7 @@ import org.jetbrains.kotlin.ir.expressions.IrContainerExpression
 import org.jetbrains.kotlin.ir.expressions.IrExpression
 import org.jetbrains.kotlin.ir.expressions.IrGetValue
 import org.jetbrains.kotlin.ir.expressions.IrLocalDelegatedPropertyReference
+import org.jetbrains.kotlin.ir.expressions.IrRichPropertyReference
 import org.jetbrains.kotlin.ir.symbols.IrSimpleFunctionSymbol
 import org.jetbrains.kotlin.ir.types.typeWith
 import org.jetbrains.kotlin.ir.util.deepCopyWithSymbols
@@ -91,7 +92,7 @@ internal class DelegateLowering(
      * read and write `current`, boxing a value class through their generic `T`.
      */
     private fun operatorCall(accessor: IrSimpleFunction): (IrCall) -> IrExpression {
-        val operator = checkNotNull(accessor.body?.find { it is IrCall && it.arguments.any { a -> a is IrLocalDelegatedPropertyReference } }) {
+        val operator = checkNotNull(accessor.body?.find { it is IrCall && it.arguments.any { a -> a.isDelegatedPropertyReference() } }) {
             "No delegate operator call in ${accessor.name}"
         } as IrCall
         val value = accessor.parameters.lastOrNull()?.symbol
@@ -101,7 +102,7 @@ internal class DelegateLowering(
                 operator.typeArguments.forEachIndexed { index, type -> typeArguments[index] = type }
                 operator.arguments.forEachIndexed { index, argument ->
                     arguments[index] = when {
-                        argument is IrLocalDelegatedPropertyReference -> b.irNull()
+                        argument.isDelegatedPropertyReference() -> b.irNull()
                         argument is IrGetValue && argument.symbol == value -> call.arguments.single()
                         else -> argument?.deepCopyWithSymbols()
                     }
@@ -143,3 +144,6 @@ internal class DelegateLowering(
         return listOf(delegate, value, setValue)
     }
 }
+
+private fun IrExpression?.isDelegatedPropertyReference(): Boolean =
+    this is IrLocalDelegatedPropertyReference || this is IrRichPropertyReference
