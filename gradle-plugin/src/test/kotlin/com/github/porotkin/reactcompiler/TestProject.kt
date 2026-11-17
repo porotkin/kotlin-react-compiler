@@ -11,6 +11,8 @@ internal class TestProject(
     private val realReact: Boolean = false,
     /** Applies Seskar before the plugin, as a kotlin-react project does: Seskar keys elements by source position. */
     private val seskar: Boolean = false,
+    /** Targets ES2015, where Kotlin/JS emits coroutines as generators instead of state machines. */
+    private val es2015: Boolean = false,
 ) {
     private val repository = System.getProperty("testRepository")
 
@@ -123,6 +125,7 @@ internal class TestProject(
                         browser()
                         binaries.executable()
                         useEsModules()
+                        ${if (es2015) "compilerOptions { target.set(\"es2015\") }" else ""}
                     }
                 }
             }

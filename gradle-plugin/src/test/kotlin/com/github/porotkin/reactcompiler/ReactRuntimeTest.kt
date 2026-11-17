@@ -352,7 +352,16 @@ class ReactRuntimeTest : PluginTest() {
 
     @Test
     fun `runs suspend lambdas passed to hooks that capture a ref in React 19`() {
-        TestProject(dir, realReact = true).apply {
+        assertSuspendLambdasRun(es2015 = false)
+    }
+
+    @Test
+    fun `runs suspend lambdas passed to hooks that capture a ref in React 19 when coroutines are generators`() {
+        assertSuspendLambdasRun(es2015 = true)
+    }
+
+    private fun assertSuspendLambdasRun(es2015: Boolean) {
+        TestProject(dir, realReact = true, es2015 = es2015).apply {
             module(
                 "app",
                 """
@@ -425,6 +434,8 @@ class ReactRuntimeTest : PluginTest() {
         assertTrue("keyed:Hello:Hello" in output, "Expected the suspend lambda called with its parameter in:\n$output")
         assertTrue("launched:true:Hello" in output, "Expected the suspend lambda started by launch in:\n$output")
         assertTrue("callback:Hello!" in output, "Expected the suspend useCallback called in:\n$output")
+        val generators = dir.walkTopDown().first { it.name.endsWith("-app.mjs") }.readText().contains("function *")
+        assertEquals(es2015, generators, "Expected coroutines as generators only for ES2015")
         assertTrue(""""consoleErrors":[]""" in output, "Expected no React errors in:\n$output")
     }
 
