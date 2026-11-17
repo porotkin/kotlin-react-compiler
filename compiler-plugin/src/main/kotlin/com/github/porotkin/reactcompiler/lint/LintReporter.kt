@@ -1,5 +1,6 @@
 package com.github.porotkin.reactcompiler.lint
 
+import org.jetbrains.kotlin.AbstractKtSourceElement
 import org.jetbrains.kotlin.KtOffsetsOnlySourceElement
 import org.jetbrains.kotlin.backend.common.extensions.IrPluginContext
 import org.jetbrains.kotlin.com.intellij.psi.PsiElement
@@ -10,6 +11,7 @@ import org.jetbrains.kotlin.diagnostics.Severity
 import org.jetbrains.kotlin.diagnostics.SourceElementPositioningStrategies
 import org.jetbrains.kotlin.diagnostics.rendering.BaseDiagnosticRendererFactory
 import org.jetbrains.kotlin.diagnostics.rendering.CommonRenderers
+import org.jetbrains.kotlin.ir.IrDiagnosticReporter
 import org.jetbrains.kotlin.ir.IrElement
 import org.jetbrains.kotlin.ir.declarations.IrFile
 
@@ -37,6 +39,21 @@ internal class LintReporter(
         context.diagnosticReporter.at(source, at, file).report(factory, "$message [${rule.name}]")
     }
 }
+
+// https://youtrack.jetbrains.com/issue/KT-87385
+@Suppress("EXTENSION_SHADOWED_BY_MEMBER")
+private fun IrDiagnosticReporter.at(
+    source: AbstractKtSourceElement,
+    irElement: IrElement,
+    file: IrFile,
+): IrDiagnosticReporter.IrDiagnosticContext = at(irElement, file, source)
+
+@Suppress("EXTENSION_SHADOWED_BY_MEMBER")
+private fun IrDiagnosticReporter.at(
+    irElement: IrElement,
+    file: IrFile,
+    source: AbstractKtSourceElement,
+): IrDiagnosticReporter.IrDiagnosticContext = at(source, irElement, file)
 
 private object LintDiagnostics : KtDiagnosticsContainer() {
     private val errors = LintRule.entries.associateWith { factory(it, Severity.ERROR) }
