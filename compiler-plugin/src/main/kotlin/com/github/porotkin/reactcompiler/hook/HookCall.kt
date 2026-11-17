@@ -21,6 +21,7 @@ import org.jetbrains.kotlin.ir.builders.irVararg
 import org.jetbrains.kotlin.ir.declarations.IrConstructor
 import org.jetbrains.kotlin.ir.declarations.IrDeclarationOrigin
 import org.jetbrains.kotlin.ir.declarations.IrDeclarationParent
+import org.jetbrains.kotlin.ir.declarations.IrFunction
 import org.jetbrains.kotlin.ir.declarations.IrParameterKind
 import org.jetbrains.kotlin.ir.declarations.IrSimpleFunction
 import org.jetbrains.kotlin.ir.declarations.IrVariable
@@ -32,6 +33,7 @@ import org.jetbrains.kotlin.ir.expressions.IrFunctionExpression
 import org.jetbrains.kotlin.ir.expressions.IrFunctionReference
 import org.jetbrains.kotlin.ir.expressions.IrGetObjectValue
 import org.jetbrains.kotlin.ir.expressions.IrGetValue
+import org.jetbrains.kotlin.ir.expressions.IrRichFunctionReference
 import org.jetbrains.kotlin.ir.expressions.IrSpreadElement
 import org.jetbrains.kotlin.ir.expressions.IrStatementOrigin
 import org.jetbrains.kotlin.ir.expressions.IrVararg
@@ -115,8 +117,8 @@ internal class HookCall(
         if (ref.isSuspend || !(type.isFunction() || discardsReflection && type.isKFunction()) || ref.target.name.isHookName()) {
             return ref.expression
         }
-        val function = ref.adapter ?: adapterOf(ref.reference)
-        val bound = function.parameters.zip(ref.reference.arguments)
+        val function = ref.adapter ?: adapterOf(ref.expression as IrFunctionReference)
+        val bound = function.parameters.zip(ref.arguments)
             .mapNotNull { (parameter, value) -> value?.let { parameter.symbol to stable(it, "bound") } }
             .toMap()
         function.parameters = function.parameters.filter { it.symbol !in bound }.onEach { it.kind = IrParameterKind.Regular }
@@ -242,32 +244,35 @@ internal class HookCall(
 }
 
 /**
- * A callable reference in a shape Kotlin/JS 2.4 hands a plugin: `::f` / `x::f` as [reference] itself, or a reference
- * Kotlin adapted to the expected type (default arguments, `vararg`, a `Unit` result) through [adapter], a local
- * function calling the target, with [reference] pointing at it. Either way, [reference] binds its non-null arguments to
- * the parameters at their positions.
+ * A callable reference to [target]: `::f` / `x::f` as a plain function reference, which Kotlin/JS 2.4 hands a plugin
+ * unless Kotlin adapted it to the expected type (default arguments, `vararg`, a `Unit` result) through [adapter], a
+ * local function calling the target, or a Kotlin 2.5 rich reference, which always calls the target through [adapter].
+ * Either way, [arguments] are the values bound to the parameters at their positions.
  */
 internal class CallableRef(
     val expression: IrExpression,
-    val reference: IrFunctionReference,
+    val target: IrFunction,
+    val arguments: List<IrExpression?>,
     val adapter: IrSimpleFunction?,
 ) {
-    /** The function the reference names. */
-    val target get() = (reference.reflectionTarget ?: reference.symbol).owner
+    val isSuspend get() = adapter?.isSuspend ?: (target as? IrSimpleFunction)?.isSuspend == true
 
-    val isSuspend get() = adapter?.isSuspend ?: (reference.symbol.owner as? IrSimpleFunction)?.isSuspend == true
-
-    val bound get() = reference.arguments.filterNotNull()
+    val bound get() = arguments.filterNotNull()
 }
 
-/** This as a [CallableRef]; `null` for other shapes, rich references included, which stay as they are. */
+/** This as a [CallableRef]; `null` for other shapes, which stay as they are. */
 internal fun IrExpression.asCallableRef(): CallableRef? =
     when {
-        this is IrFunctionReference -> CallableRef(this, this, adapter = null)
+        this is IrFunctionReference -> CallableRef(this, symbol.owner, arguments, adapter = null)
+        this is IrRichFunctionReference -> reflectionTargetSymbol?.let { CallableRef(this, it.owner, boundValues, invokeFunction) }
         this is IrBlock && origin == IrStatementOrigin.ADAPTED_FUNCTION_REFERENCE && statements.size == 2 -> {
             val adapter = statements[0] as? IrSimpleFunction
             val reference = statements[1] as? IrFunctionReference
-            if (adapter != null && reference != null) CallableRef(this, reference, adapter) else null
+            if (adapter != null && reference != null) {
+                CallableRef(this, (reference.reflectionTarget ?: reference.symbol).owner, reference.arguments, adapter)
+            } else {
+                null
+            }
         }
         else -> null
     }
