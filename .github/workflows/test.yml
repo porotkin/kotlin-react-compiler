@@ -21,7 +21,7 @@ jobs:
     continue-on-error: true
     steps:
       - uses: actions/checkout@v7
-      - run: sed -i 's/^kotlin = .*/kotlin = "2.5.0-Beta2"/' gradle/libs.versions.toml
+      - run: sed -i 's/^kotlin = .*/kotlin = "2.5.0-RC"/' gradle/libs.versions.toml
       - uses: actions/setup-java@v6
         with:
           distribution: temurin
