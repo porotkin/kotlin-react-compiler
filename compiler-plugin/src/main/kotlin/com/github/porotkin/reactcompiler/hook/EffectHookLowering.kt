@@ -20,6 +20,7 @@ import org.jetbrains.kotlin.ir.expressions.IrFunctionReference
 import org.jetbrains.kotlin.ir.expressions.IrGetObjectValue
 import org.jetbrains.kotlin.ir.expressions.IrGetValue
 import org.jetbrains.kotlin.ir.expressions.IrReturn
+import org.jetbrains.kotlin.ir.expressions.IrRichFunctionReference
 import org.jetbrains.kotlin.ir.expressions.IrTry
 import org.jetbrains.kotlin.ir.expressions.IrVararg
 import org.jetbrains.kotlin.ir.symbols.IrSimpleFunctionSymbol
@@ -126,6 +127,7 @@ private fun IrSimpleFunction.isSynchronousEffect(): Boolean {
             it is IrGetValue && it.symbol in parameters ||
             it is IrCall && it.symbol.owner.isSuspend ||
             it is IrFunctionReference && (it.symbol.owner as? IrSimpleFunction)?.isSuspend == true ||
+            it is IrRichFunctionReference && it.invokeFunction.isSuspend ||
             it is IrFunctionExpression && it.function.isSuspend
     }
 }
