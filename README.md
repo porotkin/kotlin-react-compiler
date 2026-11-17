@@ -15,7 +15,7 @@ A Kotlin/JS compiler plugin and Gradle plugin that lowers `kotlin-react` compone
 ```kotlin
 plugins {
     kotlin("multiplatform") version "2.4.21"
-    id("io.github.porotkin.kotlin-react-compiler") version "1.0.7"
+    id("io.github.porotkin.kotlin-react-compiler") version "1.0.8"
 }
 ```
 
