@@ -191,7 +191,7 @@ class HookLoweringTest : PluginTest() {
     }
 
     @Test
-    fun `creates suspend lambdas passed to custom hooks when the hook calls them`() {
+    fun `creates suspend lambdas passed to hooks when the hook calls them`() {
         val mjs = compile(
             """
             fun useAsyncEffect(key: Any?, block: suspend (String) -> Unit) {
@@ -199,6 +199,8 @@ class HookLoweringTest : PluginTest() {
             }
 
             fun usePlain(block: suspend () -> Unit): Any = block
+
+            fun useSave(title: String): suspend (String) -> Unit = useCallback(title) { suffix -> console.log(title + suffix) }
 
             fun useLoader(title: String) {
                 val ref = useRef<String>(null)
@@ -212,6 +214,10 @@ class HookLoweringTest : PluginTest() {
         assertTrue(
             Regex("""useAsyncEffect\(title, function \(p0, completion\) \{\s+return useLoader\$[\w$]+\(ref, title, null\)\(p0, completion\);\s+\}\);""") in mjs,
             "Expected the suspend lambda created inside a plain function taking its parameter and the continuation in:\n$mjs"
+        )
+        assertTrue(
+            Regex("""useCallbackRaw\(function \(p0, completion\) \{\s+return useSave\$[\w$]+\(title, null\)\(p0, completion\);\s+\}, \[title\]\)""") in mjs,
+            "Expected a suspend useCallback callback created inside an inline function in:\n$mjs"
         )
         assertTrue(Regex("""usePlain\(stored\)""") in mjs, "Expected a stored suspend lambda passed as it is in:\n$mjs")
         assertTrue(

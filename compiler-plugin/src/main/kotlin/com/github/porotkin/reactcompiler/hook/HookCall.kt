@@ -86,12 +86,16 @@ internal class HookCall(
         }
     }
 
-    /** [callback] as an inline lambda: a lambda as it is, a callable reference expanded when [expand] allows. */
+    /**
+     * [callback] as an inline lambda: a lambda as it is, a suspend lambda, which Kotlin/JS always emits as a `$slambda`
+     * factory call, [deferred][deferSuspendLambda], a callable reference expanded when [expand] allows.
+     */
     fun inlineCallback(
         callback: IrExpression,
         discardsReflection: Boolean,
     ): IrExpression {
         if (callback is IrFunctionExpression) {
+            if (callback.function.isSuspend) return deferSuspendLambda(callback)
             context.noLifting(callback.function, symbols)
             return callback
         }

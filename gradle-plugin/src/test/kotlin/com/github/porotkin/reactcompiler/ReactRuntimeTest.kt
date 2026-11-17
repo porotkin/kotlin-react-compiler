@@ -351,7 +351,7 @@ class ReactRuntimeTest : PluginTest() {
     }
 
     @Test
-    fun `runs suspend lambdas passed to custom hooks that capture a ref in React 19`() {
+    fun `runs suspend lambdas passed to hooks that capture a ref in React 19`() {
         TestProject(dir, realReact = true).apply {
             module(
                 "app",
@@ -395,6 +395,12 @@ class ReactRuntimeTest : PluginTest() {
                     }
                     useKeyedEffect(props.title) { key -> console.log("keyed:" + key + ":" + seen.current) }
                     useLaunch(props.title) { console.log("launched:" + isActive + ":" + seen.current) }
+                    val title = props.title
+                    val save: suspend (String) -> Unit = useCallback(title) { suffix ->
+                        seen.current = title + suffix
+                        console.log("callback:" + seen.current)
+                    }
+                    useAsyncEffect(save) { save("!") }
                     div { +props.title }
                 }
                 """,
@@ -418,6 +424,7 @@ class ReactRuntimeTest : PluginTest() {
         assertTrue("async:Hello" in output, "Expected the ref written by the suspend lambda in:\n$output")
         assertTrue("keyed:Hello:Hello" in output, "Expected the suspend lambda called with its parameter in:\n$output")
         assertTrue("launched:true:Hello" in output, "Expected the suspend lambda started by launch in:\n$output")
+        assertTrue("callback:Hello!" in output, "Expected the suspend useCallback called in:\n$output")
         assertTrue(""""consoleErrors":[]""" in output, "Expected no React errors in:\n$output")
     }
 
