@@ -60,7 +60,7 @@ abstract class PluginTest {
         mjs: String,
         name: String,
     ): Boolean =
-        Regex("""function ${Regex.escape(name)}\([^)]*\) \{\s+(?:_init_properties_\w+\(\);\s+)?'use memo';""") in mjs
+        Regex("""function ${Regex.escape(name)}\([^)]*\) \{\s+(?:_init_properties_\w+\(\);\s+)?__krcUseMemo\(\);""") in mjs
 
     /** Compiles [declarations] in an `app` module importing `react.*` and returns the module's JavaScript. */
     protected fun compile(declarations: String): String {

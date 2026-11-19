@@ -23,9 +23,10 @@ plugins {
 - Lowers only JS compilations with `kotlin-react` on the classpath. If that version lacks a declaration the plugin
   needs, the plugin warns and skips the module.
 - React Compiler itself runs over the output in
-  [vite-plugin-react-kotlinjs](https://github.com/porotkin/vite-plugin-react-kotlinjs), after 2.1.1 since 1.0.9: props
-  objects start with `Object()`, which it turns into `{}` in compiled functions, as the Kotlin compiler parses every
-  `js("({})")` one by one (a module with many elements took up to a third longer to compile).
+  [vite-plugin-react-kotlinjs](https://github.com/porotkin/vite-plugin-react-kotlinjs), after 2.1.1 since 1.0.9: the
+  plugin emits no `js()` calls, which the Kotlin compiler parses one by one (a module with many elements took up to a
+  third longer to compile). It marks a function to compile with `__krcUseMemo();`, which vite-plugin-react-kotlinjs
+  turns into `"use memo"`, and starts props objects with `Object()`, which it turns into `{}` in compiled functions.
 - Passes `-Xir-generate-inline-anonymous-functions` to the JS target, because React Compiler accepts hook callbacks
   only as inline functions. The option takes effect where the JavaScript is generated, so apply the plugin to the
   project that builds the executable too.
@@ -45,7 +46,7 @@ plugins {
   ```
   ```js
   function Title$lambda(props) {
-    'use memo';
+    __krcUseMemo(); // "use memo"
     var attrs = Object();
     attrs.children = props.title;
     return jsx(h1, attrs, '@rdk/1ox2ifs/1_4');

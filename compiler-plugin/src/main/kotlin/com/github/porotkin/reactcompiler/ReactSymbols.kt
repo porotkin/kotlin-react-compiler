@@ -60,6 +60,9 @@ internal class ReactSymbols private constructor(
 
     /** `Object()`, from the annotations artifact. */
     val emptyObject = function(REACT_COMPILER, "emptyObject")
+
+    /** The call vite-plugin-react-kotlinjs turns into `"use memo"`, from the annotations artifact. */
+    val useMemo = function(REACT_COMPILER, "__krcUseMemo")
     val undefined = finder.findProperties(callable(KOTLIN_JS, "undefined")).singleOrNull()?.owner?.getter?.symbol
         ?: missing("$KOTLIN_JS.undefined")
 

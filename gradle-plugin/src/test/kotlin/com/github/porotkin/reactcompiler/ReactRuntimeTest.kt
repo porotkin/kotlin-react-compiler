@@ -714,7 +714,8 @@ class ReactRuntimeTest : PluginTest() {
 
                 const compiled = [];
                 const targetPath = new URL('./${mjsFile.name}', import.meta.url);
-                const source = fs.readFileSync(targetPath, 'utf8');
+                // what vite-plugin-react-kotlinjs does: the Kotlin plugin marks the functions to compile with a call
+                const source = fs.readFileSync(targetPath, 'utf8').replaceAll('__krcUseMemo();', "'use memo';");
                 const normalized = babel.transformSync(source, {
                   filename: '${mjsFile.name}',
                   sourceType: 'module',

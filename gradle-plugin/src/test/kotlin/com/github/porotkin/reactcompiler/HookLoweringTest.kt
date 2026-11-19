@@ -50,7 +50,7 @@ class HookLoweringTest : PluginTest() {
         )
 
         assertTrue("return useMemo(tmp, function () {" in mjs, "Expected spread useMemo left as is in:\n$mjs")
-        assertFalse("'use memo';" in mjs, "Expected no 'use memo' in spread/suspend/member hooks in:\n$mjs")
+        assertFalse("__krcUseMemo();" in mjs, "Expected no 'use memo' in spread/suspend/member hooks in:\n$mjs")
     }
 
     @Test
@@ -77,7 +77,7 @@ class HookLoweringTest : PluginTest() {
 
         assertEquals(
             2,
-            Regex("'use memo';\\s*'use no memo';").findAll(mjs).count(),
+            Regex("__krcUseMemo\\(\\);\\s*'use no memo';").findAll(mjs).count(),
             "Expected 'use no memo' right after 'use memo', where React Compiler reads both as directives, in:\n$mjs",
         )
         assertTrue(isLowered(mjs, "Title\$lambda"), "Expected the opted-out component still lowered in:\n$mjs")
@@ -99,7 +99,7 @@ class HookLoweringTest : PluginTest() {
             """,
         )
 
-        assertTrue("'use memo';" in mjs, "Expected 'use memo' in:\n$mjs")
+        assertTrue("__krcUseMemo();" in mjs, "Expected 'use memo' in:\n$mjs")
         assertTrue(Regex("""var (dep\w*) = toString\(trim\([^\n]+\)\);\s+var len = useMemoRaw\(function \(\) \{[^}]+\}, \[\1\]\);""") in mjs, "Expected hoisted useMemo dependency in:\n$mjs")
         assertTrue(Regex("""var (dep\w*) = props\.get_step_[\w$]+\(\) \+ 1 \| 0;\s+return useCallbackRaw\(function \(\) \{[^}]+\}, \[len, \1\]\);""") in mjs, "Expected hoisted useCallback dependency in:\n$mjs")
     }

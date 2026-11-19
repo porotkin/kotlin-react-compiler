@@ -87,7 +87,7 @@ class ComponentLoweringTest : PluginTest() {
             const js = fs.readFileSync('$mjs', 'utf8').split('\n');
             const kotlin = fs.readFileSync('${File(dir, "app/src/jsMain/kotlin/App.kt")}', 'utf8').split('\n');
             const map = new SourceMap(JSON.parse(fs.readFileSync('$mjs.map', 'utf8')));
-            for (let line = js.indexOf("  'use memo';", js.indexOf('function Card${'$'}lambda(props) {')); js[line] !== '}'; line++) {
+            for (let line = js.indexOf("  __krcUseMemo();", js.indexOf('function Card${'$'}lambda(props) {')); js[line] !== '}'; line++) {
               const sources = new Set();
               for (let column = 0; column < js[line].length; column++) {
                 const entry = map.findEntry(line, column);
@@ -100,7 +100,7 @@ class ComponentLoweringTest : PluginTest() {
 
         assertEquals(
             """
-            'use memo'; <- val Card: FC<Props> = FC { props ->
+            __krcUseMemo(); <- val Card: FC<Props> = FC { props ->
             var dep = props.get_key(); <- val label = useMemo(props.key) { "label" }
             var label = useMemoRaw(function () { <- val label = useMemo(props.key) { "label" }
             return 'label'; <- val label = useMemo(props.key) { "label" }
@@ -168,7 +168,7 @@ class ComponentLoweringTest : PluginTest() {
             """,
         )
 
-        assertTrue("'use memo';" in mjs, "Expected lowered component in:\n$mjs")
+        assertTrue("__krcUseMemo();" in mjs, "Expected lowered component in:\n$mjs")
         assertEquals("""{"value":"a!?","children":"a!"}""", runNode("app", "console.log(JSON.stringify(m.renderComputed().props));"))
     }
 
@@ -585,7 +585,7 @@ class ComponentLoweringTest : PluginTest() {
             """,
         )
 
-        assertFalse("'use memo';" in mjs, "Expected all escaping components to bail without 'use memo' in:\n$mjs")
+        assertFalse("__krcUseMemo();" in mjs, "Expected all escaping components to bail without 'use memo' in:\n$mjs")
         assertFalse("var el = jsx(" in mjs, "Expected no jsx() calls when components bail in:\n$mjs")
         assertTrue("get_extra()(\$this\$div);" in mjs, "Expected extra() called with builder receiver in:\n$mjs")
         assertTrue("helper(\$this\$div);" in mjs, "Expected helper() called with builder receiver in:\n$mjs")

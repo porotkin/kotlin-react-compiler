@@ -111,16 +111,12 @@ internal fun irVal(
     buildVariable(parent, value.startOffset, value.endOffset, IrDeclarationOrigin.DEFINED, Name.identifier(name), type)
         .apply { initializer = value }
 
-/** React Compiler's opt-in directive: in `annotation` mode it only compiles functions that start with it. */
-private const val USE_MEMO = "\"use memo\""
-
+/** `__krcUseMemo()`, which vite-plugin-react-kotlinjs turns into the directive: the compiler parses a `js()` call. */
 internal fun IrBuilderWithScope.irUseMemo(symbols: ReactSymbols): IrCall =
-    irJs(symbols, USE_MEMO)
+    irCall(symbols.useMemo)
 
-internal fun IrStatement.isUseMemo(symbols: ReactSymbols): Boolean {
-    val call = unwrapCoercion() as? IrCall ?: return false
-    return call.symbol == symbols.js && (call.arguments[0] as? IrConst)?.value == USE_MEMO
-}
+internal fun IrStatement.isUseMemo(symbols: ReactSymbols): Boolean =
+    (unwrapCoercion() as? IrCall)?.symbol == symbols.useMemo
 
 /** React Compiler's opt-out directive: it leaves a function that starts with it as it is. */
 private const val USE_NO_MEMO = "use no memo"

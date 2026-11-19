@@ -52,7 +52,7 @@ class ReactCompilerPluginTest : PluginTest() {
         project.run(":app:compileDevelopmentExecutableKotlinJs")
 
         val mjs = dir.walkTopDown().first { it.extension == "mjs" && "Counter" in it.readText() }.readText()
-        assertTrue("'use memo';" in mjs, "Expected 'use memo' directive in:\n$mjs")
+        assertTrue("__krcUseMemo();" in mjs, "Expected 'use memo' directive in:\n$mjs")
         assertTrue("useMemoRaw(" in mjs && "useCallbackRaw(" in mjs, "Expected raw hook calls in:\n$mjs")
         assertTrue(isLowered(mjs, "Counter\$lambda"), "Expected lowered 1-arg component in:\n$mjs")
         assertTrue("jsx(" in mjs, "Expected lowered jsx call in:\n$mjs")
@@ -97,7 +97,7 @@ class ReactCompilerPluginTest : PluginTest() {
             "Expected missing-declaration warning in:\n$output",
         )
         val mjs = dir.walkTopDown().first { it.name.endsWith("-app.mjs") }.readText()
-        assertFalse("'use memo';" in mjs, "Expected lowering skipped cleanly in:\n$mjs")
+        assertFalse("__krcUseMemo();" in mjs, "Expected lowering skipped cleanly in:\n$mjs")
     }
 
     @Test
