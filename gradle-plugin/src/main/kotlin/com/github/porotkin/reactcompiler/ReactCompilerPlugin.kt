@@ -1,6 +1,7 @@
 package com.github.porotkin.reactcompiler
 
 import org.gradle.api.Project
+import org.gradle.api.artifacts.ModuleDependency
 import org.gradle.api.provider.Provider
 import org.gradle.kotlin.dsl.create
 import org.gradle.kotlin.dsl.findByType
@@ -13,6 +14,8 @@ class ReactCompilerPlugin : KotlinCompilerPluginSupportPlugin {
     override fun apply(target: Project): Unit = with(target) {
         extensions.create<ReactCompilerExtension>(EXTENSION_NAME).lint.enabled.convention(true)
 
+        keepPluginClassesWarmInKotlinDaemon()
+
         plugins.withType<KotlinBasePlugin>().configureEach {
             if (pluginVersion != KOTLIN_VERSION) {
                 logger.warn("Kotlin React Compiler is built for Kotlin $KOTLIN_VERSION, not $pluginVersion, and may fail.")
@@ -24,6 +27,14 @@ class ReactCompilerPlugin : KotlinCompilerPluginSupportPlugin {
                     compilerOptions.freeCompilerArgs.add(INLINE_LAMBDAS)
                 }
             }
+        }
+    }
+
+    private fun Project.keepPluginClassesWarmInKotlinDaemon() {
+        val plugin = dependencies.create(COMPILER_PLUGIN_COORDINATES) as ModuleDependency
+        plugin.isTransitive = false
+        configurations.matching { it.name == COMPILER_CLASSPATH }.configureEach {
+            withDependencies { add(plugin) }
         }
     }
 

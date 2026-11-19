@@ -25,6 +25,12 @@ internal val COMPILER_PLUGIN_ARTIFACT: SubpluginArtifact =
         version = PROPERTIES.getProperty("version"),
     )
 
+internal val COMPILER_PLUGIN_COORDINATES: String =
+    "${COMPILER_PLUGIN_ARTIFACT.groupId}:${COMPILER_PLUGIN_ARTIFACT.artifactId}:${COMPILER_PLUGIN_ARTIFACT.version}"
+
+/** KGP's configuration of the compiler (and Kotlin daemon) classpath. */
+internal const val COMPILER_CLASSPATH = "kotlinCompilerClasspath"
+
 /** The `@ComponentWrapper` / `@ElementWrapper` annotations, an `api` dependency of every main JS compilation. */
 internal val ANNOTATIONS_DEPENDENCY: String =
     "${PROPERTIES.getProperty("group")}:annotations:${PROPERTIES.getProperty("version")}"
