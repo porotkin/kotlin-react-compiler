@@ -58,6 +58,14 @@ internal class ReactSymbols private constructor(
     val js = function(KOTLIN_JS, "js")
     val dynamicType: IrType get() = js.owner.returnType
 
+    /** `Object()`, from the annotations artifact. */
+    val emptyObject = function(REACT_COMPILER, "emptyObject")
+    val undefined = finder.findProperties(callable(KOTLIN_JS, "undefined")).singleOrNull()?.owner?.getter?.symbol
+        ?: missing("$KOTLIN_JS.undefined")
+
+    /** `arrayOf()`, printed as `[]` without elements. */
+    val arrayOf = function(KOTLIN, "arrayOf")
+
     /** `run(block)`, as opposed to `T.run(block)`. */
     val run = function(KOTLIN, "run") { it.owner.parameters.size == 1 }
     val jsx = function(JSX_RUNTIME, "jsx") { it.owner.parameters.size == 3 }

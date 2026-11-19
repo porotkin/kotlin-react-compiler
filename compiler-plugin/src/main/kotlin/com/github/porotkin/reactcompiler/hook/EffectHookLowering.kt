@@ -3,7 +3,7 @@ package com.github.porotkin.reactcompiler.hook
 import com.github.porotkin.reactcompiler.ReactLowering
 import com.github.porotkin.reactcompiler.ReactSymbols
 import com.github.porotkin.reactcompiler.any
-import com.github.porotkin.reactcompiler.irJs
+import com.github.porotkin.reactcompiler.irUndefined
 import com.github.porotkin.reactcompiler.noLifting
 import org.jetbrains.kotlin.backend.common.extensions.IrPluginContext
 import org.jetbrains.kotlin.backend.common.lower.DeclarationIrBuilder
@@ -75,17 +75,17 @@ internal class EffectHookLowering(
                     if (expression.returnTargetSymbol != function.symbol) return expression
                     val b = builder(function.symbol, expression)
                     val value = expression.value
-                    if (value is IrGetObjectValue && value.type.isUnit()) return b.irReturn(b.irJs(symbols, "undefined"))
+                    if (value is IrGetObjectValue && value.type.isUnit()) return b.irReturn(b.irUndefined(symbols))
                     return b.irBlock(resultType = context.irBuiltIns.nothingType) {
                         +value
-                        +irReturn(irJs(symbols, "undefined"))
+                        +irReturn(irUndefined(symbols))
                     }
                 }
             },
         )
         val body = function.body as IrBlockBody
         val b = DeclarationIrBuilder(context, function.symbol, body.endOffset, body.endOffset)
-        body.statements += b.irReturn(b.irJs(symbols, "undefined"))
+        body.statements += b.irReturn(b.irUndefined(symbols))
         effect.type = context.irBuiltIns.functionN(0).typeWith(anyNType)
         return effect
     }

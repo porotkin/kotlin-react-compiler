@@ -1,7 +1,9 @@
 package com.github.porotkin.reactcompiler.component
 
 import com.github.porotkin.reactcompiler.ReactSymbols
-import com.github.porotkin.reactcompiler.irJs
+import com.github.porotkin.reactcompiler.irEmptyArray
+import com.github.porotkin.reactcompiler.irEmptyObject
+import com.github.porotkin.reactcompiler.irUndefined
 import com.github.porotkin.reactcompiler.irUseMemo
 import com.github.porotkin.reactcompiler.irVal
 import com.github.porotkin.reactcompiler.isUseMemo
@@ -155,7 +157,7 @@ internal class ComponentEmitter(
         items: List<Item>,
         out: MutableList<IrStatement>,
     ): IrVariable? =
-        if (items.any { it.addsLoop() }) local("children", b.irJs(symbols, "([])"), out) else null
+        if (items.any { it.addsLoop() }) local("children", b.irEmptyArray(symbols), out) else null
 
     private fun emit(
         item: Item,
@@ -313,7 +315,7 @@ internal class ComponentEmitter(
         val attrsType = if (element.propsType.isSubtypeOfClass(symbols.propsClass)) element.propsType else symbols.fragmentProps
         // Created at its first use, or once the children are built, so it stays out of the code that builds them.
         val attrs = lazy {
-            local("attrs", b.irImplicitCast(b.irJs(symbols, "({})"), attrsType), out).also { attrs ->
+            local("attrs", b.irImplicitCast(b.irEmptyObject(symbols), attrsType), out).also { attrs ->
                 element.receiver?.let { substitutions[it] = attrs }
                 for (prop in props) {
                     out += if (prop.setter != null) {
@@ -359,7 +361,7 @@ internal class ComponentEmitter(
         out: MutableList<IrStatement>,
     ): IrExpression {
         if (!children.static) return children.nodes.singleOrNull() ?: b.irNull(symbols.reactNode)
-        val attrs = local("attrs", b.irImplicitCast(b.irJs(symbols, "({})"), symbols.fragmentProps), out)
+        val attrs = local("attrs", b.irImplicitCast(b.irEmptyObject(symbols), symbols.fragmentProps), out)
         setChildren(attrs, children, out)
         return jsx(b.irCall(symbols.fragment), b.irGet(attrs), attrs.type, null, staticChildren = true)
     }
@@ -404,7 +406,7 @@ internal class ComponentEmitter(
                 // React keys an element "null" for a null key, so pass none instead, as kotlin-react's `jsx` does. A
                 // nullable key is an explicit `key = ...`, which [stable] made safe to read twice.
                 arguments[2] = key?.takeIf { it.type.isNullable() }
-                    ?.let { b.irIfNull(it.type, it, b.irJs(symbols, "undefined"), it.deepCopyWithSymbols()) }
+                    ?.let { b.irIfNull(it.type, it, b.irUndefined(symbols), it.deepCopyWithSymbols()) }
                     ?: key
             }
         }

@@ -8,6 +8,9 @@ import org.jetbrains.kotlin.ir.builders.IrBuilderWithScope
 import org.jetbrains.kotlin.ir.builders.declarations.buildVariable
 import org.jetbrains.kotlin.ir.builders.irAnnotation
 import org.jetbrains.kotlin.ir.builders.irCall
+import org.jetbrains.kotlin.ir.builders.irVararg
+import org.jetbrains.kotlin.ir.builders.irImplicitCast
+import org.jetbrains.kotlin.ir.types.typeWith
 import org.jetbrains.kotlin.ir.builders.irString
 import org.jetbrains.kotlin.ir.declarations.IrDeclarationOrigin
 import org.jetbrains.kotlin.ir.declarations.IrDeclarationParent
@@ -73,10 +76,25 @@ internal fun IrPluginContext.noLifting(
 internal fun IrElement.callsUnloweredHook(symbols: ReactSymbols): Boolean =
     any { it is IrCall && (it.symbol in symbols.rawHooks || it.symbol in symbols.effectHooks) }
 
-/** React Compiler's opt-in directive: in `annotation` mode it only compiles functions that start with it. */
-private const val USE_MEMO = "\"use memo\""
+/** `Object()`, a new empty object, which the compiler does not parse as it does `js("({})")`. */
+internal fun IrBuilderWithScope.irEmptyObject(symbols: ReactSymbols): IrCall =
+    irCall(symbols.emptyObject)
 
-/** `js("<code>")` */
+/** `[]`, typed `dynamic` like the `js("([])")` it replaces. */
+internal fun IrBuilderWithScope.irEmptyArray(symbols: ReactSymbols): IrExpression {
+    val element = context.irBuiltIns.anyNType
+    val array = irCall(symbols.arrayOf, context.irBuiltIns.arrayClass.typeWith(element)).apply {
+        typeArguments[0] = element
+        arguments[0] = irVararg(element, emptyList())
+    }
+    return irImplicitCast(array, symbols.dynamicType)
+}
+
+/** `undefined` */
+internal fun IrBuilderWithScope.irUndefined(symbols: ReactSymbols): IrCall =
+    irCall(symbols.undefined)
+
+/** `js("<code>")`: the backend parses the code at every call, so only where nothing else prints it. */
 internal fun IrBuilderWithScope.irJs(
     symbols: ReactSymbols,
     code: String,
@@ -92,6 +110,9 @@ internal fun irVal(
 ): IrVariable =
     buildVariable(parent, value.startOffset, value.endOffset, IrDeclarationOrigin.DEFINED, Name.identifier(name), type)
         .apply { initializer = value }
+
+/** React Compiler's opt-in directive: in `annotation` mode it only compiles functions that start with it. */
+private const val USE_MEMO = "\"use memo\""
 
 internal fun IrBuilderWithScope.irUseMemo(symbols: ReactSymbols): IrCall =
     irJs(symbols, USE_MEMO)

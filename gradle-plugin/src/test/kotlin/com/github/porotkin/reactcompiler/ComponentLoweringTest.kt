@@ -107,11 +107,11 @@ class ComponentLoweringTest : PluginTest() {
             }, [dep]); <- val label = useMemo(props.key) { "label" }
             var type = get_div(); <- div {
             var type_0 = get_span(); <- span {
-            var attrs = {}; <- span {
+            var attrs = Object(); <- span {
             attrs.set_title(label); <- title = label
             attrs.set_children(label); <- span { | +label
             var el = jsx(type_0, attrs, ''); <- span {
-            var attrs_0 = {}; <- div {
+            var attrs_0 = Object(); <- div {
             attrs_0.set_children(el); <- div { | span {
             var el_0 = jsx(type, attrs_0, ''); <- div {
             return el_0; <- div {
